@@ -1,0 +1,238 @@
+---
+title: "Untitled"
+output: html_document
+---
+
+
+#NicheNet analysis for Jamie
+```{r}
+# install.packages("devtools")
+devtools::install_github("saeyslab/nichenetr")
+```
+
+```{r}
+library(nichenetr)
+library(Seurat)
+library(tidyverse)
+```
+
+#Read in NicheNet’s ligand-target prior model, ligand-receptor network and weighted integrated networks:
+```{r}
+lr_network = readRDS(url("https://zenodo.org/record/3260758/files/lr_network.rds"))
+```
+
+```{r}
+ligand_target_matrix = readRDS(url("https://zenodo.org/record/3260758/files/ligand_target_matrix.rds"))
+```
+```{r}
+weighted_networks = readRDS(url("https://zenodo.org/record/3260758/files/weighted_networks.rds"))
+weighted_networks_lr = weighted_networks$lr_sig %>% inner_join(lr_network %>% distinct(from,to), by = c("from","to"))
+```
+
+# Convert human genes to mouse genes
+```{r}
+lr_network = lr_network %>% mutate(from = convert_human_to_mouse_symbols(from), to = convert_human_to_mouse_symbols(to)) %>% drop_na()
+colnames(ligand_target_matrix) = ligand_target_matrix %>% colnames() %>% convert_human_to_mouse_symbols()
+rownames(ligand_target_matrix) = ligand_target_matrix %>% rownames() %>% convert_human_to_mouse_symbols()
+
+ligand_target_matrix = ligand_target_matrix %>% .[!is.na(rownames(ligand_target_matrix)), !is.na(colnames(ligand_target_matrix))]
+
+weighted_networks_lr = weighted_networks_lr %>% mutate(from = convert_human_to_mouse_symbols(from), to = convert_human_to_mouse_symbols(to)) %>% drop_na()
+```
+
+
+```{r}
+object1 <- readRDS("annotated.rds")
+```
+
+```{r}
+DefaultAssay(object1) <- "RNA"
+```
+
+```{r}
+DimPlot(object1,label = T)
+```
+
+```{r}
+object1$celltype <- paste(Idents(object1), object1@meta.data$orig.ident, sep = "_")
+```
+
+```{r}
+Idents(object1) <- "celltype"
+```
+
+# Define "receiver cells"
+# Receiver cells: Macro
+```{r}
+## receiver
+receiver = c("Macro_C24")
+expressed_genes_receiver = get_expressed_genes(receiver, object1, pct = 0.10,assay_oi = "RNA")
+
+background_expressed_genes = expressed_genes_receiver %>% .[. %in% rownames(ligand_target_matrix)]
+```
+
+# Define "sender cells"
+# Sender cells: Endo
+```{r}
+sender_celltypes = c("Endo_C24")
+list_expressed_genes_sender = sender_celltypes %>% unique() %>% lapply(get_expressed_genes, object1, 0.10,assay_oi = "RNA") # lapply to get the expressed genes of every sender cell type separately here
+expressed_genes_sender = list_expressed_genes_sender %>% unlist() %>% unique()
+```
+
+#Differential expression analysis using receiver cells
+```{r}
+DefaultAssay(object1) <- "RNA"
+DE_table_receiver = FindMarkers(object = object1, ident.1 = "Macro_C24", ident.2 = c("Macro_C0"), min.pct = 0.10,logfc.threshold = 0) %>% rownames_to_column("gene")
+```
+
+```{r}
+geneset_oi = DE_table_receiver %>% filter(p_val_adj <= 0.05 & abs(avg_log2FC) >= 0.2) %>% pull(gene)
+```
+```{r}
+geneset_oi = geneset_oi %>% .[. %in% rownames(ligand_target_matrix)]
+```
+# Define a set of potential ligands
+```{r}
+ligands = lr_network %>% pull(from) %>% unique()
+receptors = lr_network %>% pull(to) %>% unique()
+
+expressed_ligands = intersect(ligands,expressed_genes_sender)
+expressed_receptors = intersect(receptors,expressed_genes_receiver)
+
+potential_ligands = lr_network %>% filter(from %in% expressed_ligands & to %in% expressed_receptors) %>% pull(from) %>% unique()
+```
+
+```{r}
+ligand_activities = predict_ligand_activities(geneset = geneset_oi, background_expressed_genes = background_expressed_genes, ligand_target_matrix = ligand_target_matrix, potential_ligands = potential_ligands)
+
+ligand_activities = ligand_activities %>% arrange(-pearson) %>% mutate(rank = rank(desc(pearson)))
+```
+
+```{r}
+ligand_activities
+```
+
+
+# Top 20 predicted ligands
+```{r}
+best_upstream_ligands = ligand_activities %>% top_n(20, pearson) %>% arrange(-pearson) %>% pull(test_ligand) %>% unique()
+```
+
+# Check expression of patterns of predicted ligands
+```{r}
+DotPlot(object1, features = best_upstream_ligands, cols = "RdYlBu") + RotatedAxis()
+```
+# Predicted ligands and target genes
+```{r}
+active_ligand_target_links_df = best_upstream_ligands %>% lapply(get_weighted_ligand_target_links,geneset = geneset_oi, ligand_target_matrix = ligand_target_matrix, n = 200) %>% bind_rows() %>% drop_na()
+
+active_ligand_target_links = prepare_ligand_target_visualization(ligand_target_df = active_ligand_target_links_df, ligand_target_matrix = ligand_target_matrix, cutoff = 0.33)
+
+order_ligands = intersect(best_upstream_ligands, colnames(active_ligand_target_links)) %>% rev() %>% make.names()
+order_targets = active_ligand_target_links_df$target %>% unique() %>% intersect(rownames(active_ligand_target_links)) %>% make.names()
+rownames(active_ligand_target_links) = rownames(active_ligand_target_links) %>% make.names() # make.names() for heatmap visualization of genes like H2-T23
+colnames(active_ligand_target_links) = colnames(active_ligand_target_links) %>% make.names() # make.names() for heatmap visualization of genes like H2-T23
+
+vis_ligand_target = active_ligand_target_links[order_targets,order_ligands] %>% t()
+```
+
+```{r}
+p_ligand_target_network = vis_ligand_target %>% make_heatmap_ggplot("Prioritized ligands","Predicted target genes", color = "purple",legend_position = "top", x_axis_position = "top",legend_title = "Regulatory potential")  + theme(axis.text.x = element_text(face = "italic")) + scale_fill_gradient2(low = "whitesmoke",  high = "purple", breaks = c(0,0.0045,0.0090))
+p_ligand_target_network
+```
+
+#Receptors of top-ranked ligands
+```{r}
+lr_network_top = lr_network %>% filter(from %in% best_upstream_ligands & to %in% expressed_receptors) %>% distinct(from,to)
+best_upstream_receptors = lr_network_top %>% pull(to) %>% unique()
+
+lr_network_top_df_large = weighted_networks_lr %>% filter(from %in% best_upstream_ligands & to %in% best_upstream_receptors)
+
+lr_network_top_df = lr_network_top_df_large %>% spread("from","weight",fill = 0)
+lr_network_top_matrix = lr_network_top_df %>% select(-to) %>% as.matrix() %>% magrittr::set_rownames(lr_network_top_df$to)
+
+dist_receptors = dist(lr_network_top_matrix, method = "binary")
+hclust_receptors = hclust(dist_receptors, method = "ward.D2")
+order_receptors = hclust_receptors$labels[hclust_receptors$order]
+    
+dist_ligands = dist(lr_network_top_matrix %>% t(), method = "binary")
+hclust_ligands = hclust(dist_ligands, method = "ward.D2")
+order_ligands_receptor = hclust_ligands$labels[hclust_ligands$order]
+
+order_receptors = order_receptors %>% intersect(rownames(lr_network_top_matrix))
+order_ligands_receptor = order_ligands_receptor %>% intersect(colnames(lr_network_top_matrix))
+
+vis_ligand_receptor_network = lr_network_top_matrix[order_receptors, order_ligands_receptor]
+rownames(vis_ligand_receptor_network) = order_receptors %>% make.names()
+colnames(vis_ligand_receptor_network) = order_ligands_receptor %>% make.names()
+```
+
+```{r}
+p_ligand_receptor_network = vis_ligand_receptor_network %>% t() %>% make_heatmap_ggplot("Ligands","Receptors", color = "mediumvioletred", x_axis_position = "top",legend_title = "Prior interaction potential")
+p_ligand_receptor_network
+```
+
+#Receptors of top-ranked ligands, but after considering only bona fide ligand-receptor interactions documented in literature and publicly available databases
+```{r}
+lr_network_strict = lr_network %>% filter(database != "ppi_prediction_go" & database != "ppi_prediction")
+ligands_bona_fide = lr_network_strict %>% pull(from) %>% unique()
+receptors_bona_fide = lr_network_strict %>% pull(to) %>% unique()
+
+lr_network_top_df_large_strict = lr_network_top_df_large %>% distinct(from,to) %>% inner_join(lr_network_strict, by = c("from","to")) %>% distinct(from,to)
+lr_network_top_df_large_strict = lr_network_top_df_large_strict %>% inner_join(lr_network_top_df_large, by = c("from","to"))
+
+lr_network_top_df_strict = lr_network_top_df_large_strict %>% spread("from","weight",fill = 0)
+lr_network_top_matrix_strict = lr_network_top_df_strict %>% select(-to) %>% as.matrix() %>% magrittr::set_rownames(lr_network_top_df_strict$to)
+
+dist_receptors = dist(lr_network_top_matrix_strict, method = "binary")
+hclust_receptors = hclust(dist_receptors, method = "ward.D2")
+order_receptors = hclust_receptors$labels[hclust_receptors$order]
+
+dist_ligands = dist(lr_network_top_matrix_strict %>% t(), method = "binary")
+hclust_ligands = hclust(dist_ligands, method = "ward.D2")
+order_ligands_receptor = hclust_ligands$labels[hclust_ligands$order]
+
+order_receptors = order_receptors %>% intersect(rownames(lr_network_top_matrix_strict))
+order_ligands_receptor = order_ligands_receptor %>% intersect(colnames(lr_network_top_matrix_strict))
+
+vis_ligand_receptor_network_strict = lr_network_top_matrix_strict[order_receptors, order_ligands_receptor]
+rownames(vis_ligand_receptor_network_strict) = order_receptors %>% make.names()
+colnames(vis_ligand_receptor_network_strict) = order_ligands_receptor %>% make.names()
+```
+
+```{r}
+p_ligand_receptor_network_strict = vis_ligand_receptor_network_strict %>% t() %>% make_heatmap_ggplot("Ligands","Receptors", color = "mediumvioletred", x_axis_position = "top",legend_title = "Prior interaction potential\n(bona fide)")
+p_ligand_receptor_network_strict
+```
+# ligand activity heatmap
+```{r}
+ligand_pearson_matrix = ligand_activities %>% select(pearson) %>% as.matrix() %>% magrittr::set_rownames(ligand_activities$test_ligand)
+
+rownames(ligand_pearson_matrix) = rownames(ligand_pearson_matrix) %>% make.names()
+colnames(ligand_pearson_matrix) = colnames(ligand_pearson_matrix) %>% make.names()
+
+vis_ligand_pearson = ligand_pearson_matrix[order_ligands, ] %>% as.matrix(ncol = 1) %>% magrittr::set_colnames("Pearson")
+p_ligand_pearson = vis_ligand_pearson %>% make_heatmap_ggplot("Prioritized ligands","Ligand activity", color = "darkorange",legend_position = "top", x_axis_position = "top", legend_title = "Pearson correlation coefficient\ntarget gene prediction ability)") + theme(legend.text = element_text(size = 9))
+p_ligand_pearson
+```
+
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r cars}
+summary(cars)
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r pressure, echo=FALSE}
+plot(pressure)
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
