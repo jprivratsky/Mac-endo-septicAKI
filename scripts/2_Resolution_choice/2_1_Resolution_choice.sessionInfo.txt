@@ -1,0 +1,63 @@
+R version 4.0.3 (2020-10-10)
+Platform: x86_64-conda-linux-gnu (64-bit)
+Running under: Red Hat Enterprise Linux Server release 6.8 (Santiago)
+
+Matrix products: default
+BLAS:   /gpfs/fs1/data/omicscore/Privratsky-Privratsky-20210215/scripts/conda/envs/privratsky/lib/libblas.so.3.8.0
+LAPACK: /gpfs/fs1/data/omicscore/Privratsky-Privratsky-20210215/scripts/conda/envs/privratsky/lib/liblapack.so.3.8.0
+
+locale:
+ [1] LC_CTYPE=en_US.UTF-8       LC_NUMERIC=C              
+ [3] LC_TIME=en_US.UTF-8        LC_COLLATE=en_US.UTF-8    
+ [5] LC_MONETARY=en_US.UTF-8    LC_MESSAGES=en_US.UTF-8   
+ [7] LC_PAPER=en_US.UTF-8       LC_NAME=C                 
+ [9] LC_ADDRESS=C               LC_TELEPHONE=C            
+[11] LC_MEASUREMENT=en_US.UTF-8 LC_IDENTIFICATION=C       
+
+attached base packages:
+[1] stats     graphics  grDevices utils     datasets  methods   base     
+
+other attached packages:
+[1] patchwork_1.1.1    clustree_0.4.3     ggraph_2.0.4       ggplot2_3.3.3     
+[5] cowplot_1.1.1      SeuratObject_4.0.0 Seurat_4.0.0      
+
+loaded via a namespace (and not attached):
+  [1] Rtsne_0.15           colorspace_2.0-0     deldir_0.2-9        
+  [4] ellipsis_0.3.1       ggridges_0.5.3       spatstat.data_2.0-0 
+  [7] leiden_0.3.7         listenv_0.8.0        farver_2.0.3        
+ [10] graphlayouts_0.7.1   ggrepel_0.9.1        RSpectra_0.16-0     
+ [13] codetools_0.2-18     splines_4.0.3        knitr_1.31          
+ [16] polyclip_1.10-0      jsonlite_1.7.2       ica_1.0-2           
+ [19] cluster_2.1.1        png_0.1-7            uwot_0.1.10         
+ [22] ggforce_0.3.2        shiny_1.6.0          sctransform_0.3.2   
+ [25] compiler_4.0.3       httr_1.4.2           backports_1.2.1     
+ [28] Matrix_1.3-2         fastmap_1.1.0        lazyeval_0.2.2      
+ [31] limma_3.46.0         later_1.1.0.1        tweenr_1.0.1        
+ [34] formatR_1.7          htmltools_0.5.1.1    tools_4.0.3         
+ [37] igraph_1.2.6         gtable_0.3.0         glue_1.4.2          
+ [40] RANN_2.6.1           reshape2_1.4.4       dplyr_1.0.4         
+ [43] Rcpp_1.0.6           spatstat_1.64-1      scattermore_0.7     
+ [46] vctrs_0.3.6          nlme_3.1-152         gbRd_0.4-11         
+ [49] lmtest_0.9-38        xfun_0.20            stringr_1.4.0       
+ [52] rbibutils_2.0        globals_0.14.0       openxlsx_4.2.3      
+ [55] mime_0.10            miniUI_0.1.1.1       lifecycle_1.0.0     
+ [58] irlba_2.3.3          goftest_1.2-2        future_1.21.0       
+ [61] MASS_7.3-53.1        zoo_1.8-8            scales_1.1.1        
+ [64] tidygraph_1.2.0      promises_1.2.0.1     spatstat.utils_2.0-0
+ [67] parallel_4.0.3       RColorBrewer_1.1-2   yaml_2.2.1          
+ [70] reticulate_1.18      pbapply_1.4-3        gridExtra_2.3       
+ [73] rpart_4.1-15         stringi_1.5.3        highr_0.8           
+ [76] checkmate_2.0.0      zip_2.1.1            Rdpack_2.1          
+ [79] rlang_0.4.10         pkgconfig_2.0.3      matrixStats_0.58.0  
+ [82] evaluate_0.14        lattice_0.20-41      ROCR_1.0-11         
+ [85] purrr_0.3.4          tensor_1.5           htmlwidgets_1.5.3   
+ [88] labeling_0.4.2       tidyselect_1.1.0     parallelly_1.23.0   
+ [91] RcppAnnoy_0.0.18     plyr_1.8.6           magrittr_2.0.1      
+ [94] R6_2.5.0             generics_0.1.0       pillar_1.4.7        
+ [97] withr_2.4.1          mgcv_1.8-33          fitdistrplus_1.1-3  
+[100] survival_3.2-7       abind_1.4-5          tibble_3.0.6        
+[103] future.apply_1.7.0   crayon_1.4.1         KernSmooth_2.23-18  
+[106] plotly_4.9.3         rmarkdown_2.6        viridis_0.5.1       
+[109] grid_4.0.3           data.table_1.13.6    metap_1.1           
+[112] digest_0.6.27        xtable_1.8-4         tidyr_1.1.2         
+[115] httpuv_1.5.5         munsell_0.5.0        viridisLite_0.3.0   

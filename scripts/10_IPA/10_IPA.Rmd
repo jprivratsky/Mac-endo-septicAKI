@@ -1,0 +1,635 @@
+---
+title: "Privratsky-20210215 - Prepare IPA analyses and visualization of results"
+author: "Hélène Fradin Kirshner"
+date: "05/04/2021"
+output: html_document
+---
+
+source conda/bin/activate privratsky
+rmarkdown::render('./10_IPA/10_IPA.Rmd')
+
+Changes in myeloid and kidney cells after CLP - Analysis of 2 x 10X scRNA-seq samples from 2 pools of WT mice (3 Sham + 3 CLP): comparison of gene expression in different cell populations
+
+IPA analyses for DE C24 vs. C0 within main cell types and macrophages subclusters
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+                      echo=TRUE, warning=FALSE, message=FALSE, error=FALSE
+                      , tidy.opts=list(width.cutoff=60),tidy=TRUE
+                      , cache=TRUE
+                      #, cache.lazy = FALSE
+                      )
+# knitr::opts_knit$set(root.dir = '/data/omicscore/Privratsky-Privratsky-20210215')
+knitr::opts_knit$set(root.dir = '~/Volumes/HARDAC-OmicsCore/Privratsky-Privratsky-20210215')
+```
+
+```{r}
+indir <- "./processedData/7_DEA_C24_vs_C0"
+outdir <- "./processedData/10_IPA"
+dir.create(outdir, recursive = T)
+```
+
+# FIND THRESHOLDS FOR IPA ANALYSES
+
+```{r}
+library(Seurat)
+annotated <- readRDS(paste0(indir, "/3.annotated.rds"))
+```
+
+```{r}
+DefaultAssay(annotated) <- "RNA"
+Idents(annotated) <- "annotation.1"
+cell.types <- levels(annotated$annotation.1)
+de.list <- lapply(cell.types, function(cell.type) {
+  filename <- paste0(indir, "/2_DE_manual_annotation_C24_vs_C0_", cell.type, ".xlsx")
+  sheets <- openxlsx::getSheetNames(filename)
+  SheetList <- lapply(sheets,openxlsx::read.xlsx,xlsxFile=filename)
+  openxlsx::write.xlsx(SheetList[[3]]
+    , paste0(outdir, "/1_DE_manual_annotation_C24_vs_C0_", cell.type, "_for_IPA.xlsx")
+    , colNames = F
+  )
+  SheetList[[3]]
+})
+names(de.list) <- cell.types
+```
+
+## adjusted p-value < 0.05
+```{r}
+no.sig.genes <- sapply(de.list, function(df) {
+  dim(df[(df$p_val_adj<0.05), ])[1]
+})
+no.sig.genes
+```
+
+```{r}
+table(no.sig.genes >= 100, no.sig.genes <= 600)
+```
+
+## adjusted p-value < 0.01
+```{r}
+no.sig.genes <- sapply(de.list, function(df) {
+  dim(df[(df$p_val_adj<0.01), ])[1]
+})
+no.sig.genes
+```
+
+```{r}
+table(no.sig.genes >= 100, no.sig.genes <= 600)
+```
+
+## adjusted p-value < 0.05 and abs(logFC) > 0.25
+```{r}
+no.sig.genes <- sapply(de.list, function(df) {
+  dim(df[((df$p_val_adj<0.05)&(abs(df$avg_log2FC)>0.25)), ])[1]
+})
+no.sig.genes
+```
+
+```{r}
+table(no.sig.genes >= 100, no.sig.genes <= 600)
+```
+
+## adjusted p-value < 0.01 and abs(logFC) > 0.25
+```{r}
+no.sig.genes <- sapply(de.list, function(df) {
+  dim(df[((df$p_val_adj<0.01)&(abs(df$avg_log2FC)>0.25)), ])[1]
+})
+no.sig.genes
+```
+
+```{r}
+table(no.sig.genes >= 100, no.sig.genes <= 600)
+```
+
+# IPA ANALYSES MANUALLY
+
+# HEATMAP WITH IPA RESULTS
+
+```{r}
+library(pheatmap)
+```
+
+Build numeric matrix of the values to be plotted
+```{r}
+mat <- matrix(ncol = 1)
+top <- vector()
+colnames(mat) <- "Ingenuity Canonical Pathways"
+library(readxl)
+cell.types <- levels(annotated$annotation.1)
+for(cell.type in cell.types) {
+  print(cell.type)
+  cpa <- read_xls(paste0(outdir, "/2_IPA_results/1_DE_C24_vs_C0/", "1_b_adjpval_0_01_logFC_0_25_DE_C24_vs_C0_", gsub("-", "_", gsub(" ", "_", cell.type)) , "_Canonical_Pathways.xls"),
+                    col_names = T)
+  colnames(cpa) <- cpa[1, ]
+  cpa <- cpa[-1, ]
+  top <- c(top, cpa$`Ingenuity Canonical Pathways`[!is.na(cpa$`z-score`)][1:3])
+  cpa <- cpa[, c(1, 4)]
+  colnames(cpa)[2] <- gsub(" ", ".", cell.type)
+  mat <- merge(mat, cpa, by = "Ingenuity Canonical Pathways", all = T)
+}
+head(mat)
+```
+
+```{r}
+mat <- mat[-dim(mat)[1], ]
+rownames(mat) <- mat[, 1]
+mat <- mat[, -1]
+head(mat)
+```
+
+```{r}
+mat.num <- apply(mat, 2, as.numeric)
+rownames(mat.num) <- rownames(mat)
+head(mat.num)
+```
+
+Export z-score matrix
+```{r}
+library(openxlsx)
+write.xlsx(mat,
+           file = paste0(outdir, "/3_IPA_z_score_matrix_Canonical_Pathways_DE_C24_vs_C0_per_cell_type.xlsx"),
+           row.names = T,
+           keepNA = T)
+```
+
+```{r}
+top <- unique(top)
+top
+```
+
+```{r}
+top <- top[!is.na(top)]
+top
+```
+
+```{r}
+AllEqual <- structure(function(
+	##title<< 
+	## Check if all values in a vector are the same
+	##description<<
+	## This function is used to check if all values in a vector are equal. It can be used for example to check if a time series contains only 0 or NA values.
+	
+	x
+	### numeric, character vector, or time series of type ts
+) {
+	res <- FALSE
+	x <- na.omit(as.vector(x))
+	if (length(unique(x)) == 1 | length(x) == 0) res <- TRUE
+	return(res)
+	### The function returns TRUE if all values are equal and FALSE if it contains different values.
+},ex=function(){
+# check if all values are equal in the following vectors:
+AllEqual(1:10)
+AllEqual(rep(0, 10))
+AllEqual(letters)
+AllEqual(rep(NA, 10))
+})
+```
+
+```{r}
+mat.num.top.same.row <- apply(mat.num[top, ], 1, AllEqual)
+mat.num.top.same.col <- apply(mat.num[top, ], 2, AllEqual)
+mat.num.top <- mat.num[top, ][!mat.num.top.same.row, !mat.num.top.same.col]
+
+head(mat.num.top)
+```
+
+```{r}
+pheatmap(mat.num.top
+         , cluster_rows = T
+         , cluster_cols = T
+         )
+```
+
+```{r}
+paletteLength <- 50
+myColor <- colorRampPalette(c("#050fe6", "#fefafc", "#e37c22"))(paletteLength)
+# length(breaks) == length(paletteLength) + 1
+# use floor and ceiling to deal with even/odd length pallettelengths
+myBreaks <- c(seq(min(mat.num[top, ][!is.na(mat.num[top, ])]), 0, length.out=ceiling(paletteLength/2) + 1), 
+              seq(max(mat.num[top, ][!is.na(mat.num[top, ])])/paletteLength, max(mat.num[top, ][!is.na(mat.num[top, ])]), length.out=floor(paletteLength/2)))
+```
+
+```{r, eval=FALSE}
+# colnames(mat.num) <- levels(as.factor(tcells.2.1.integrated$renamed.tcells.2.1.subclusters))
+# head(mat.num)
+```
+
+```{r}
+# Plot the heatmap
+p <- pheatmap(mat.num.top,
+         color=myColor,
+         breaks=myBreaks,
+         border_color = NA,
+         cellwidth = 20,
+         cellheight = 20,
+         cluster_rows = T,
+         cluster_cols = T,
+         # treeheight_row = 0,
+         angle_col = 45,
+         # na_col = "#000000"
+         na_col = "gray50"
+         )
+p
+pdf(paste0(outdir, "/4_Heatmap_z_score_Canonical_Pathways_DE_C24_vs_C0_per_cell_type_top3_pathways_per_DE.pdf"),
+    width = 4 + 0.4 * length(colnames(mat.num.top)),
+    height = 2 + 0.3 * length(rownames(mat.num.top)))
+p
+dev.off()
+```
+
+## Heat map for the specific macrophage IPA pathways
+
+```{r, eval=FALSE}
+# pathways <- c("IL-1 Signaling",
+# "iNOS Signaling",
+# "IL-6 Signaling",
+# "TREM1 Signaling",
+# "Hypoxia Signaling in the Cardiovascular System",
+# "PD-1, PD-L1 cancer immunotherapy pathway",
+# "LXR/RXR Activation",
+# "PPAR Signaling",
+# "PPARα/RXRα Activation",
+# "Hepatic Fibrosis Signaling Pathway",
+# "Regulation Of The Epithelial Mesenchymal Transition By Growth Factors Pathway",
+# "Thrombin Signaling",
+# "Fcγ Receptor-mediated Phagocytosis in Macrophages and Monocytes",
+# "IL-15 Production",
+# "HIF1α Signaling",
+# "CCR5 Signaling in Macrophages",
+# "CXCR4 Signaling",
+# "IL-9 Signaling",
+# "VEGF Signaling")
+```
+
+```{r, eval=FALSE}
+# table(pathways %in% rownames(mat.num))
+```
+
+```{r, eval=FALSE}
+# Plot the heatmap
+# colnames(mat.num) <- levels(as.factor(tcells.2.1.integrated$renamed.tcells.2.1.subclusters))
+# p <- pheatmap(mat.num[pathways, ],
+#          color=myColor,
+#          breaks=myBreaks,
+#          border_color = NA,
+#          cellwidth = 20,
+#          cellheight = 20,
+#          cluster_rows = F,
+#          cluster_cols = F,
+#          treeheight_row = 0,
+#          angle_col = 45,
+#          na_col = "#000000")
+# p
+# pdf(paste0(outdir, "/9_Heatmap_z_score_Canonical_Pathways_IM2_LPS_PBS.HDM_CD45.2_vs_PBS_PBS_Pathways_of_interest.pdf"),
+#     width = 8,
+#     height = 7)
+# p
+# dev.off()
+```
+
+```{r, eval=FALSE}
+# key.pathways <- c(rownames(mat.num)[grep("Renal", rownames(mat.num))]
+# )
+# key.pathways
+```
+
+```{r, eval=FALSE}
+# Plot the heatmap
+# colnames(mat.num) <- levels(as.factor(tcells.2.1.integrated$renamed.tcells.2.1.subclusters))
+# p <- pheatmap(mat.num[key.pathways, ],
+#          color=myColor,
+#          breaks=myBreaks,
+#          border_color = NA,
+#          cellwidth = 20,
+#          cellheight = 20,
+#          cluster_rows = F,
+#          cluster_cols = F,
+#          treeheight_row = 0,
+#          angle_col = 45,
+#          na_col = "#000000")
+# p
+# pdf(paste0(outdir, "/10_Heatmap_z_score_Canonical_Pathways_IM2_LPS_PBS.HDM_CD45.2_vs_PBS_PBS_Pathways_of_interest_by_keyword.pdf"),
+#     width = 6,
+#     height = 0.6 * length(key.pathways))
+# p
+# dev.off()
+```
+
+# Redo the matrix with + and - to facilitate going through it / also lists of >2 pathways
+
+```{r}
+zscore.mat <- openxlsx::read.xlsx(paste0(outdir, "/3_IPA_z_score_matrix_Canonical_Pathways_DE_C24_vs_C0_per_cell_type.xlsx")
+                                  , rowNames = T
+                                  , colNames = T)
+
+zscore.mat.dig <- zscore.mat
+
+zscore.mat.dig <- as.data.frame(sapply(zscore.mat.dig, as.numeric))
+rownames(zscore.mat.dig) <- rownames(zscore.mat)
+list_of_datasets <- list()
+for (j in 1:dim(zscore.mat.dig)[2]) {
+  print(j)
+  vector <- zscore.mat.dig[j]
+  vector <- vector[ ( !is.na(vector[[1]]) ), ]
+  names(vector) <- rownames(zscore.mat.dig) [!is.na(zscore.mat.dig[[j]])]
+  vector.activated <- vector[vector >= 2]
+  vector.activated <- sort(vector.activated, decreasing = T)
+  if (length(vector.activated) != 0) {
+    dataframe.activated <- stack(vector.activated)
+    colnames(dataframe.activated) <- c(paste0(colnames(zscore.mat)[j], " z-score"), "Activated pathway")
+    list <- list(dataframe.activated)
+    names(list) <- paste0(colnames(zscore.mat)[j], " activated pathways")
+    list_of_datasets <- append(list_of_datasets , list)
+  }
+  vector.inhibited <- vector[vector <= -2]
+  vector.inhibited <- sort(vector.inhibited, decreasing = F)
+  if (length(vector.inhibited) != 0) {
+    dataframe.inhibited <- stack(vector.inhibited)
+    colnames(dataframe.inhibited) <- c(paste0(colnames(zscore.mat)[j], " z-score"), "Inhibited pathway")
+    list <- list(dataframe.inhibited)
+    names(list) <- paste0(colnames(zscore.mat)[j], " inhibited pathways")
+    list_of_datasets <- append(list_of_datasets , list)
+  }
+}
+
+zscore.mat.dig <- zscore.mat
+for (i in 1:dim(zscore.mat.dig)[1]) {
+  for (j in 1:dim(zscore.mat.dig)[2]) {
+    if (! is.na(zscore.mat.dig[i,j])) {
+      if (as.numeric(zscore.mat.dig[i,j]) <= -2) {
+        zscore.mat.dig[i,j] <- "-"
+      } else if ( (as.numeric(zscore.mat.dig[i,j]) > -2) && (as.numeric(zscore.mat.dig[i,j]) < 2) ) {
+        zscore.mat.dig[i,j] <- "0"
+      } else if (as.numeric(zscore.mat.dig[i,j]) >= 2) {
+        zscore.mat.dig[i,j] <- "+"
+      }
+    }
+  }
+}
+rownames(zscore.mat.dig) <- rownames(zscore.mat)
+colnames(zscore.mat.dig) <- colnames(zscore.mat)
+zscore.mat.dig <- zscore.mat.dig[rowSums(is.na(zscore.mat.dig)) != ncol(zscore.mat.dig), ]
+
+list_of_datasets <- append(list_of_datasets , list("Coded z-score matrix" = zscore.mat.dig))
+
+openxlsx::write.xlsx(list_of_datasets, file = paste0(outdir, "/5_Digitalized_IPA_z_score_matrix_Canonical_Pathways_DE_C24_vs_C0_per_cell_type.xlsx")
+                     , rowNames = T
+                     , colNames = T
+                     , keepNA = T)
+```
+
+# Pathways that behave differently
+
+```{r}
+AllEqual.NAs <- structure(function(
+	##title<< 
+	## Check if all values in a vector are the same
+	##description<<
+	## This function is used to check if all values in a vector are equal. It can be used for example to check if a time series contains only 0 or NA values.
+	
+	x
+	### numeric, character vector, or time series of type ts
+) {
+	res <- FALSE
+	x <- as.vector(x)
+	if (length(unique(x)) == 1 | length(x) == 0) res <- TRUE
+	return(res)
+	### The function returns TRUE if all values are equal and FALSE if it contains different values.
+},ex=function(){
+# check if all values are equal in the following vectors:
+AllEqual(1:10)
+AllEqual(rep(0, 10))
+AllEqual(letters)
+AllEqual(rep(NA, 10))
+})
+```
+
+```{r}
+zscore.different <- apply(zscore.mat.dig, 1, AllEqual)
+zscore.different.df <- zscore.mat.dig[!zscore.different, ]
+head(zscore.different.df)
+```
+
+```{r}
+zscore.plus.and.minus <- apply(zscore.different.df, 1, function(x) { ('+' %in% x) & ('-' %in% x) })
+zscore.plus.and.minus.df <- zscore.different.df[zscore.plus.and.minus, ]
+head(zscore.plus.and.minus.df)
+```
+
+```{r}
+mat.num.plus.and.minus.row <- apply(mat.num[rownames(zscore.plus.and.minus.df), ], 1, AllEqual)
+mat.num.plus.and.minus.col <- apply(mat.num[rownames(zscore.plus.and.minus.df), ], 2, AllEqual)
+mat.num.plus.and.minus <- mat.num[rownames(zscore.plus.and.minus.df), ][!mat.num.plus.and.minus.row, !mat.num.plus.and.minus.col]
+
+head(mat.num.plus.and.minus)
+```
+
+```{r}
+p <- pheatmap(mat.num.plus.and.minus,
+         color=myColor,
+         breaks=myBreaks,
+         border_color = NA,
+         cellwidth = 20,
+         cellheight = 20,
+         cluster_rows = T,
+         cluster_cols = T,
+         angle_col = 45,
+         na_col = "gray50")
+p
+pdf(paste0(outdir, "/6_Heatmap_z_score_Canonical_Pathways_DE_C24_vs_C0_per_cell_type_Pathways_activated_and_inhibited.pdf"),
+    width = 4 + 0.4 * length(colnames(mat.num.plus.and.minus)),
+    height = 2 + 0.3 * length(rownames(mat.num.plus.and.minus)))
+p
+dev.off()
+```
+
+## Additional heatmap with pathways of interest
+
+```{r}
+AllEqual <- structure(function(
+	##title<< 
+	## Check if all values in a vector are the same
+	##description<<
+	## This function is used to check if all values in a vector are equal. It can be used for example to check if a time series contains only 0 or NA values.
+	
+	x
+	### numeric, character vector, or time series of type ts
+) {
+	res <- FALSE
+	x <- na.omit(as.vector(x))
+	if (length(unique(x)) == 1 | length(x) == 0) res <- TRUE
+	return(res)
+	### The function returns TRUE if all values are equal and FALSE if it contains different values.
+},ex=function(){
+# check if all values are equal in the following vectors:
+AllEqual(1:10)
+AllEqual(rep(0, 10))
+AllEqual(letters)
+AllEqual(rep(NA, 10))
+})
+```
+
+```{r}
+AllEqual.NAs <- structure(function(
+	##title<< 
+	## Check if all values in a vector are the same
+	##description<<
+	## This function is used to check if all values in a vector are equal. It can be used for example to check if a time series contains only 0 or NA values.
+	
+	x
+	### numeric, character vector, or time series of type ts
+) {
+	res <- FALSE
+	x <- as.vector(x)
+	if (length(unique(x)) == 1 | length(x) == 0) res <- TRUE
+	return(res)
+	### The function returns TRUE if all values are equal and FALSE if it contains different values.
+},ex=function(){
+# check if all values are equal in the following vectors:
+AllEqual.NAs(1:10)
+AllEqual.NAs(rep(0, 10))
+AllEqual.NAs(letters)
+AllEqual.NAs(rep(NA, 10))
+})
+```
+
+```{r}
+paletteLength <- 50
+myColor <- colorRampPalette(c("#050fe6", "#fefafc", "#e37c22"))(paletteLength)
+# length(breaks) == length(paletteLength) + 1
+# use floor and ceiling to deal with even/odd length pallettelengths
+abs.min <- abs(min(mat.num[!is.na(mat.num)]))
+abs.max <- abs(max(mat.num[!is.na(mat.num)]))
+threshold <- max(abs.min, abs.max)
+myBreaks <- c(seq(-threshold, +threshold, length.out=paletteLength))
+```
+
+## Heat map for pathways of interest
+
+Angiotensin II pathway in endothelial cells
+Adhesion receptors and cytokines/chemokines from endothelial cells
+Markers of proliferation and cell cycle in podocytes
+Markers of proliferation and matrix accumulation in fibroblasts
+Cytokines/chemokines in macrophages/monocytes as markers of polarization (M1 vs M2, etc)
+
+Inducers of IL-6: TNF, IL-1b, LPS (Toll receptors)
+
+IL-6 receptor pathway signals through gp130 and STAT3 (this is well-known) so maybe interrogating cells where STAT3 responsive genes are being upregulated
+
+Inhibitors of IL-6: IL-10 (could look at cells where IL-10 is highly produced), SOCS proteins (especially SOCS3)
+
+Metabolic pathways (glycolysis, oxidative phosphorylation, etc) in macrophage and tubular cell populations
+
+```{r}
+pathways <- unique(c(grep("kidney", rownames(mat.num), ignore.case = T, value = T)
+              , grep("renal", rownames(mat.num), ignore.case = T, value = T)
+              , grep("ischemia", rownames(mat.num), ignore.case = T, value = T)
+              , grep("IL-6", rownames(mat.num), ignore.case = T, value = T)
+              , grep("angiotensin", rownames(mat.num), ignore.case = T, value = T)
+              , grep("adhesion", rownames(mat.num), ignore.case = T, value = T)
+              , grep("cytokine", rownames(mat.num), ignore.case = T, value = T)
+              , grep("chemokine", rownames(mat.num), ignore.case = T, value = T)
+              , grep("proliferation", rownames(mat.num), ignore.case = T, value = T)
+              , grep("cell cycle", rownames(mat.num), ignore.case = T, value = T)
+              , grep("matrix", rownames(mat.num), ignore.case = T, value = T)
+              , grep("accumulation", rownames(mat.num), ignore.case = T, value = T)
+              , grep("polarization", rownames(mat.num), ignore.case = T, value = T)
+              , grep("TNF", rownames(mat.num), ignore.case = T, value = T)
+              , grep("IL-1b", rownames(mat.num), ignore.case = T, value = T)
+              , grep("LPS", rownames(mat.num), ignore.case = T, value = T)
+              , grep("Toll", rownames(mat.num), ignore.case = T, value = T)
+              , grep("gp130", rownames(mat.num), ignore.case = T, value = T)
+              , grep("STAT3", rownames(mat.num), ignore.case = T, value = T)
+              , grep("IL-10", rownames(mat.num), ignore.case = T, value = T)
+              , grep("SOCS", rownames(mat.num), ignore.case = T, value = T)
+              , grep("metabolic", rownames(mat.num), ignore.case = T, value = T)
+              , grep("glycolysis", rownames(mat.num), ignore.case = T, value = T)
+              , grep("oxidative", rownames(mat.num), ignore.case = T, value = T)
+              , grep("phosphorylation", rownames(mat.num), ignore.case = T, value = T)
+              ))
+```
+
+```{r}
+# mat.num.top.same.row <- apply(mat.num[top, ], 1, AllEqual)
+# mat.num.top.same.col <- apply(mat.num[top, ], 2, AllEqual)
+# mat.num.top <- mat.num[top, ][!mat.num.top.same.row, !mat.num.top.same.col]
+mat.num.top <- mat.num[pathways, ]
+head(mat.num.top)
+```
+
+```{r}
+pheatmap(mat.num.top
+         , cluster_rows = F
+         , cluster_cols = F
+         )
+```
+
+```{r}
+# Plot the heatmap
+p <- pheatmap(mat.num.top,
+         color=myColor,
+         breaks=myBreaks,
+         border_color = NA,
+         cellwidth = 20,
+         cellheight = 20,
+         cluster_rows = F,
+         cluster_cols = F,
+         # treeheight_row = 0,
+         angle_col = 45,
+         # na_col = "#000000"
+         na_col = "gray50"
+         )
+p
+pdf(paste0(outdir, "/7_Heatmap_z_score_Canonical_Pathways_DE_C24_vs_C0_per_cell_type_pathways_of_interest.pdf"),
+    width = 6 + 0.6 * length(colnames(mat.num.top)),
+    height = 1 + 0.3 * length(rownames(mat.num.top)))
+p
+dev.off()
+```
+
+```{r}
+mat.num.top.same.row <- apply(mat.num[pathways, ], 1, AllEqual)
+mat.num.top.same.col <- apply(mat.num[pathways, ], 2, AllEqual)
+mat.num.top <- mat.num[pathways, ][!mat.num.top.same.row, !mat.num.top.same.col]
+head(mat.num.top)
+```
+
+```{r}
+pheatmap(mat.num.top
+         , cluster_rows = T
+         , cluster_cols = T
+         )
+```
+
+```{r}
+# Plot the heatmap
+p <- pheatmap(mat.num.top,
+         color=myColor,
+         breaks=myBreaks,
+         border_color = NA,
+         cellwidth = 20,
+         cellheight = 20,
+         cluster_rows = T,
+         cluster_cols = T,
+         # treeheight_row = 0,
+         angle_col = 45,
+         # na_col = "#000000"
+         na_col = "gray50"
+         )
+p
+pdf(paste0(outdir, "/8_Heatmap_z_score_Canonical_Pathways_DE_C24_vs_C0_per_cell_type_pathways_of_interest_filtered_clustered.pdf"),
+    width = 6 + 0.6 * length(colnames(mat.num.top)),
+    height = 1 + 0.3 * length(rownames(mat.num.top)))
+p
+dev.off()
+```
+
+## Session Information
+```{r, eval=FALSE}
+sessionInfo()
+```
+
+```{r, eval=FALSE}
+writeLines(capture.output(sessionInfo()), "./scripts/10_IPA/10_IPA.sessionInfo.txt")
+```
