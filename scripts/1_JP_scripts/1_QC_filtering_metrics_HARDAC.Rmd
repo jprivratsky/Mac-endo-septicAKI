@@ -1,0 +1,413 @@
+---
+title: "CLP scRNAseq-2"
+author: "Jamie Privratsky - modified by Hélène Fradin Kirshner"
+date: "02/15/2021"
+output: html_document
+---
+
+rmarkdown::render('./1_JP_scripts/1_QC_filtering_metrics_HARDAC.Rmd')
+
+Changes in myeloid and kidney cells after renal ischemia - Analysis of 2 x 10X scRNA-seq samples from 2 pools of WT (3 Sham + 3 CLP): comparison of gene expression in sham vs CLP in different cell populations
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+                      echo=TRUE, warning=FALSE, message=FALSE, error=FALSE
+                      , tidy.opts=list(width.cutoff=60),tidy=TRUE
+                      , cache=TRUE)
+knitr::opts_knit$set(root.dir = '/data/omicscore/Privratsky-Privratsky-20210215')
+```
+
+############################################################################
+############################################################################
+###                                                                      ###
+###                              SECTION 1:                              ###
+###                              LOAD DATA                               ###
+###                                                                      ###
+############################################################################
+############################################################################
+
+```{r}
+# Load the Cell Ranger Matrix Data and create the base Seurat object.
+# we initialize the Seurat object (`CreateSeuratObject`) with the raw (non-normalized data).
+
+library(Seurat)
+dataset_loc <- "./rawData/"
+ids <- c("C0", "C24")
+
+d10x.data <- sapply(ids, function(i){
+  d10x <- Read10X(file.path(dataset_loc,i,"filtered_feature_bc_matrix/"))
+  colnames(d10x) <- paste(sapply(strsplit(colnames(d10x),split="-"),'[[',1L),i,sep="--")
+  d10x
+})
+
+experiment.data <- do.call("cbind", d10x.data)
+
+experiment.aggregate <- CreateSeuratObject(
+  experiment.data,
+  project = "ShamCLP-201008", 
+  names.field = 2,
+  names.delim = "\\-\\-")
+experiment.aggregate
+```
+
+############################################################################
+############################################################################
+###                                                                      ###
+###                              SECTION 2:                              ###
+###                         ANNOTATE THE DATASET                         ###
+###                                                                      ###
+############################################################################
+############################################################################
+
+#################################################################
+##                  Calc mitocondrial content                  ##
+#################################################################
+
+Calculate percent UMIs mapping to the mitochondrial genome per cell
+
+```{r}
+experiment.aggregate[["percent.mito"]] <- PercentageFeatureSet(experiment.aggregate, pattern = "^mt-")
+summary(experiment.aggregate[["percent.mito"]])
+```
+
+#################################################################
+##                     Modify sample names                     ##
+#################################################################
+
+The original samples names (the names above in ids) can be found in the metadata slot, column orig.ident.
+```{r}
+samplename = experiment.aggregate@meta.data$orig.ident
+table(samplename)
+```
+
+# Modify sample names to include phenotypic information
+```{r}
+sample.id = rep("C0",length(samplename))
+sample.id[samplename %in% c("C24")] = "C24"
+names(sample.id) = rownames(experiment.aggregate@meta.data)
+```
+
+# Another way of adding an annotation to the Seurat object
+```{r}
+experiment.aggregate <- AddMetaData(
+  object = experiment.aggregate,
+  metadata = sample.id,
+  col.name = "sample.id")
+
+table(sample.id)
+```
+############################################################################
+############################################################################
+###                                                                      ###
+###                              SECTION 3:                              ###
+###                        QC METRICS WITH SEURAT                        ###
+###                                                                      ###
+############################################################################
+############################################################################
+```{r}
+outdir <- "./processedData/1_JP_analyses_results/Rerun_HARDAC_20210216/1_QC_filtering_metrics"
+dir.create(outdir, recursive = T)
+```
+
+```{r}
+colors <- c("#12999E", "#FDA908")
+names(colors) <- levels(as.factor(sample.id))
+v <- VlnPlot(experiment.aggregate, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, cols = colors, group.by = "sample.id")
+v
+pdf(paste0(outdir, "/1_VlnPlots_nFeature_RNA_nCount_RNA_percent.mito_per_sample_before_filtering.pdf")
+    , width = 21
+    , height = 9)
+v
+dev.off()
+```
+
+```{r}
+f <- FeatureScatter(experiment.aggregate, feature1 = "nCount_RNA", feature2 = "percent.mito", cols = colors, group.by = "sample.id")
+f
+pdf(paste0(outdir, "/2_FeatureScatter_percent.mito_vs_nCount_RNA_per_sample_before_filtering.pdf"))
+f
+dev.off()
+```
+
+```{r}
+f <- FeatureScatter(experiment.aggregate, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = colors, group.by = "sample.id")
+f
+pdf(paste0(outdir, "/3_FeatureScatter_nFeature_RNA_vs_nCount_RNA_per_sample_before_filtering.pdf"))
+f
+dev.off()
+```
+
+### Library size
+```{r}
+hist(experiment.aggregate$nCount_RNA, xlab = "Library sizes", breaks = 100, col = "grey80",
+ylab = "Number of cells", main = "Distribution of library sizes
+(= total number of transcripts per cell = $nCount_RNA)",
+cex.main = 1)
+abline(v = 2000, col = "red")
+pdf(paste0(outdir, "/4_Library_size.pdf")
+    , width = 8
+    , height = 9)
+hist(experiment.aggregate$nCount_RNA, xlab = "Library sizes", breaks = 100, col = "grey80",
+ylab = "Number of cells", main = "Distribution of library sizes
+(= total number of transcripts per cell = $nCount_RNA)",
+cex.main = 1)
+abline(v = 2000, col = "red")
+dev.off()
+```
+
+```{r}
+saveRDS(experiment.aggregate, paste0(outdir, "/5.experiment.aggregate.158.rds"))
+```
+## QC with scater
+```{r}
+# experiment.aggregate <- readRDS("./processedData/1_QC_filtering_metrics/5.experiment.aggregate.158.rds"")
+experiment.aggregate.sce <- as.SingleCellExperiment(experiment.aggregate)
+experiment.aggregate.sce
+```
+
+```{r}
+library(scater)
+per.cell <- perCellQCMetrics(experiment.aggregate.sce, 
+    subsets=list(Mito=grep("^mt-", rownames(experiment.aggregate.sce))))
+summary(per.cell$sum)
+```
+
+```{r}
+summary(experiment.aggregate$nCount_RNA)
+```
+
+```{r}
+summary(per.cell$detected)
+```
+
+```{r}
+summary(per.cell$subsets_Mito_percent)
+```
+
+```{r}
+colData(experiment.aggregate.sce) <- cbind(colData(experiment.aggregate.sce), per.cell)
+```
+
+```{r}
+p <- plotColData(experiment.aggregate.sce, x = "sum", y="detected", colour_by="sample.id")
+p
+pdf(paste0(outdir, "/6_plotColData_detected_vs_sum.pdf")
+    , width = 9
+    , height = 8)
+p
+dev.off()
+```
+
+```{r}
+p <- plotColData(experiment.aggregate.sce, x = "sum", y="subsets_Mito_percent", 
+    other_fields="sample.id") + facet_wrap(~sample.id)
+p
+pdf(paste0(outdir, "/7_plotColData_subsets_Mito_percent_vs_sum.pdf")
+    , width = 15
+    , height = 9)
+p
+dev.off()
+```
+
+```{r}
+qc.stats <- quickPerCellQC(per.cell, percent_subsets="subsets_Mito_percent")
+colData(experiment.aggregate.sce) <- cbind(colData(experiment.aggregate.sce), qc.stats)
+colSums(as.matrix(qc.stats))
+```
+
+```{r}
+experiment.aggregate.sce <- runColDataPCA(experiment.aggregate.sce, variables = c("sum", "detected", "subsets_Mito_percent"))
+p<- plotReducedDim(experiment.aggregate.sce, dimred = "PCA_coldata", colour_by = "discard",
+size_by = "subsets_Mito_percent", percentVar = 100 * attr(reducedDim(experiment.aggregate.sce),
+"percentVar")) + ggtitle("PCA based on QC metrics / Detected outlier cells are highlighted") +
+theme(plot.title = element_text(size = 7), legend.title = element_text(size = 7),
+legend.text = element_text(size = 7))
+p
+pdf(paste0(outdir, "/8_plotReducedDim_QC_metrics.pdf")
+    , width = 9
+    , height = 9)
+p
+dev.off()
+```
+
+# Manual cell filtering
+Now we can define a cell filter based on our previous analysis:
+
+```{r}
+filter_by_expr_features <- (experiment.aggregate.sce$detected >= 200 & experiment.aggregate.sce$detected <= 9000)
+table(filter_by_expr_features)
+```
+
+```{r}
+filter_by_total_counts <- (experiment.aggregate.sce$sum >= 500 & experiment.aggregate.sce$sum < 150000)
+table(filter_by_total_counts)
+```
+
+```{r}
+filter_by_MT <- experiment.aggregate.sce$subsets_Mito_percent <= 55
+table(filter_by_MT)
+```
+
+```{r}
+# filtered <- experiment.aggregate.sce[,!qc.stats$discard]
+experiment.aggregate.sce$use <- (
+    # sufficient features (genes)
+    filter_by_expr_features &
+    # sufficient molecules counted
+    filter_by_total_counts &
+    # remove cells with unusual number of reads in MT genes
+    filter_by_MT
+)
+table(experiment.aggregate.sce$use)
+```
+
+```{r}
+experiment.aggregate.sce$discard <- !experiment.aggregate.sce$use
+table(experiment.aggregate.sce$discard)
+```
+
+```{r}
+experiment.aggregate.sce <- runColDataPCA(experiment.aggregate.sce, variables = c("sum", "detected", "subsets_Mito_percent"))
+p<- plotReducedDim(experiment.aggregate.sce, dimred = "PCA_coldata", colour_by = "discard",
+size_by = "subsets_Mito_percent", percentVar = 100 * attr(reducedDim(experiment.aggregate.sce),
+"percentVar")) + ggtitle("PCA based on QC metrics / Manual outlier cells are highlighted") +
+theme(plot.title = element_text(size = 7), legend.title = element_text(size = 7),
+legend.text = element_text(size = 7))
+p
+pdf(paste0(outdir, "/9_plotReducedDim_QC_metrics_manual_filtering.pdf")
+    , width = 9
+    , height = 9)
+p
+dev.off()
+```
+
+```{r}
+filtered <- experiment.aggregate.sce[,experiment.aggregate.sce$use]
+p <- plotColData(filtered, x = "sum", y="subsets_Mito_percent", 
+    other_fields="sample.id") + facet_wrap(~sample.id)
+p
+pdf(paste0(outdir, "/10_plotColData_subsets_Mito_percent_vs_sum_post_filtering.pdf")
+    , width = 15
+    , height = 9)
+p
+dev.off()
+```
+
+```{r}
+dim(filtered)
+table(filtered$sample.id)
+```
+
+```{r}
+summary(filtered$detected)
+```
+
+```{r}
+summary(filtered$subsets_Mito_percent)
+```
+
+```{r}
+per.feat <- perFeatureQCMetrics(experiment.aggregate.sce)
+summary(per.feat$mean)
+```
+
+```{r}
+summary(per.feat$detected)
+```
+
+```{r}
+ave <- calculateAverage(experiment.aggregate.sce)
+summary(ave)
+```
+
+```{r}
+summary(nexprs(experiment.aggregate.sce, byrow=TRUE))
+```
+
+```{r}
+plotHighestExprs(experiment.aggregate.sce, exprs_values = "counts")
+pdf(paste0(outdir, "/11_plotHighestExprs.pdf")
+    , width = 7
+    , height = 7)
+plotHighestExprs(experiment.aggregate.sce, exprs_values = "counts")
+dev.off()
+```
+
+```{r}
+keep_feature <- nexprs(experiment.aggregate.sce, byrow=TRUE) > 0
+filtered <- experiment.aggregate.sce[keep_feature, experiment.aggregate.sce$use]
+dim(filtered)
+```
+
+# Explanatory factors
+We can investigate the relative importance of different explanatory factors with the plotExplanatoryVariables function. 
+This function computes the percentage of variance in gene expression that is explained by variables in the sample-level metadata. It allows problematic factors to be quickly identified, as well as the genes that are most affected. This is best done on the log-expression values to reduce the effect of the mean on the variance - hence, we run normalize first.
+This can take a while to calculate and plot.
+```{r}
+experiment.aggregate.sce <- logNormCounts(experiment.aggregate.sce)
+vars <- getVarianceExplained(experiment.aggregate.sce, 
+    variables=c("sample.id", "sum", "detected", "subsets_Mito_percent"))
+head(vars)
+```
+
+Plot explanatory variables ordered by percentage of variance explained
+```{r}
+plotExplanatoryVariables(vars)
+```
+
+```{r}
+filtered <- logNormCounts(filtered)
+vars <- getVarianceExplained(filtered, 
+    variables=c("sample.id", "sum", "detected", "subsets_Mito_percent"))
+head(vars)
+```
+
+```{r}
+plotExplanatoryVariables(vars)
+```
+
+# Using manual filters to filter Seurat object
+```{r}
+filtered <- experiment.aggregate[keep_feature, experiment.aggregate.sce$use]
+dim(filtered)
+```
+
+# QC metrics with Seurat post-filtering
+```{r}
+v <- VlnPlot(filtered, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, cols = colors, group.by = "sample.id")
+v
+pdf(paste0(outdir, "/12_VlnPlots_nFeature_RNA_nCount_RNA_percent.mito_per_sample_post_filtering.pdf")
+    , width = 21
+    , height = 9)
+v
+dev.off()
+```
+
+```{r}
+f <- FeatureScatter(filtered, feature1 = "nCount_RNA", feature2 = "percent.mito", cols = colors, group.by = "sample.id")
+f
+pdf(paste0(outdir, "/13_FeatureScatter_percent.mito_vs_nCount_RNA_per_sample_post_filtering.pdf"))
+f
+dev.off()
+```
+
+```{r}
+f <- FeatureScatter(filtered, feature1 = "nCount_RNA", feature2 = "nFeature_RNA", cols = colors, group.by = "sample.id")
+f
+pdf(paste0(outdir, "/14_FeatureScatter_nFeature_RNA_vs_nCount_RNA_per_sample_post_filtering.pdf"))
+f
+dev.off()
+```
+
+```{r}
+saveRDS(filtered, paste0(outdir, "/15.filtered.398.rds"))
+```
+
+## Session Information
+```{r}
+sessionInfo()
+```
+
+```{r}
+writeLines(capture.output(sessionInfo()), "./scripts/1_JP_scripts/1_QC_filtering_metrics_HARDAC.sessionInfo.txt")
+```

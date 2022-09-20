@@ -1,0 +1,451 @@
+---
+title: "Privratsky-20210215 - New clustering"
+author: "Hélène Fradin Kirshner"
+date: "02/24/2021"
+output: html_document
+---
+
+rmarkdown::render('./2_New_clustering/2_New_clustering.Rmd')
+
+Changes in myeloid and kidney cells after CLP - Analysis of 2 x 10X scRNA-seq samples from 2 pools of WT mice (3 Sham + 3 CLP): comparison of gene expression in different cell populations
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+                      echo=TRUE, warning=FALSE, message=FALSE, error=FALSE
+                      , tidy.opts=list(width.cutoff=60),tidy=TRUE
+                      , cache=TRUE)
+knitr::opts_knit$set(root.dir = '/data/omicscore/Privratsky-Privratsky-20210215')
+# knitr::opts_knit$set(root.dir = '~/Volumes/HARDAC-OmicsCore/Privratsky-Privratsky-20210215')
+```
+
+```{r}
+indir <- "./processedData/1_JP_analyses_results/Rerun_HARDAC_20210216/1_QC_filtering_metrics"
+outdir <- "./processedData/2_New_clustering"
+dir.create(outdir, recursive = T)
+```
+
+```{r}
+library(Seurat)
+filtered <- readRDS(paste0(indir, "/15.filtered.398.rds"))
+filtered
+```
+
+Normalize each sample individually and selected 2000 most variable genes between samples
+```{r}
+library(cowplot)
+list <- SplitObject(filtered, split.by = "sample.id")
+list <- lapply(X = list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+anchors <- FindIntegrationAnchors(object.list = list, dims = 1:20)
+integrated <- IntegrateData(anchorset = anchors, dims = 1:20)
+DefaultAssay(integrated) <- "integrated"
+integrated <- ScaleData(integrated, verbose = T)
+integrated
+```
+
+```{r}
+DefaultAssay(integrated) <- "integrated"
+integrated <- RunPCA(integrated, npcs = 30, verbose = FALSE)
+```
+
+```{r}
+integrated <- JackStraw(integrated, num.replicate = 100, dims = 30, verbose = T)
+saveRDS(integrated, paste0(outdir, "/1.integrated.56.rds"))
+# integrated <- readRDS("./processedData/2_IL1R_KO_vs_ctrl/1.integrated.56.rds")
+```
+
+```{r}
+integrated <- ScoreJackStraw(integrated, dims = 1:30)
+j <- JackStrawPlot(integrated, dims = 1:30)
+j
+pdf(paste0(outdir, "/2_JackStrawPlot.pdf"),
+    width = 10
+    , height = 8)
+j
+dev.off()
+```
+
+```{r}
+e <- ElbowPlot(integrated, ndims = 30)
+e
+pdf(paste0(outdir, "/3_ElbowPlot.pdf"))
+e
+dev.off()
+```
+
+```{r}
+integrated <- RunUMAP(integrated, dims = 1:30)
+integrated <- FindNeighbors(integrated, dims = 1:30)
+#0.4-1.2
+for (i in seq(0,2,0.1)) {
+  integrated <- FindClusters(integrated, resolution = i, verbose = F)
+}
+head(integrated[[]])
+```
+
+```{r}
+for (i in seq(0.2,0.3,0.01)) {
+  integrated <- FindClusters(integrated, resolution = i, verbose = F)
+}
+```
+
+```{r}
+# install.packages("clustree")
+library(clustree)
+c <- clustree(integrated, prefix = "integrated_snn_res.")
+c
+pdf(paste0(outdir, "/4_clustree.pdf"), width = 8.5, height = 11)
+c
+dev.off()
+```
+```{r}
+# install.packages("clustree")
+c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = "Il6", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/5_clustree_Il6.pdf"), width = 8.5, height = 11)
+c
+dev.off()
+```
+
+```{r}
+Idents(integrated) <- "integrated_snn_res.0.4"
+table(integrated@active.ident)
+```
+
+```{r}
+pal <- colorRampPalette(c("#12999E", "#FAEB09", "#E82564", "#03539C"))
+levels <- levels(integrated$integrated_snn_res.0.4)
+colors.clusters <- pal(length(levels))
+names(colors.clusters) <- levels
+colors.clusters
+slices <- rep(1,length(levels))
+pie(slices, col=colors.clusters, labels = names(colors.clusters))
+```
+
+```{r}
+d <- DimPlot(integrated, reduction = "umap", pt.size = 0.2, label = T, label.size = 6,
+             cols = colors.clusters)
+d
+pdf(paste0(outdir, "/6_DimPlot_umap_clusters_pc30_res0_4.pdf")
+    , width = 10, height = 8)
+d
+dev.off()
+```
+
+```{r}
+colors.samples <- c("#12999E", "#FDA908")
+names(colors.samples) <- levels(as.factor(integrated$sample.id))
+slices <- rep(1,length(colors.samples))
+pie(slices, col=colors.samples, labels = names(colors.samples))
+```
+
+```{r}
+p1 <- DimPlot(integrated, reduction = "umap", group.by = "sample.id", pt.size = 0.2, cols = colors.samples)
+p2 <- DimPlot(integrated, reduction = "umap", label = TRUE, pt.size = 0.2, label.size = 6, cols = colors.clusters)
+plot_grid(p1, p2)
+pdf(paste0(outdir, "/7_2DimPlots_umap_samples_clusters_pc30_res0_4.pdf")
+    , width = 18, height = 8)
+plot_grid(p1, p2)
+dev.off()
+```
+
+```{r}
+d <- DimPlot(integrated, reduction = "umap", group.by = "sample.id", split.by = "sample.id", pt.size = 0.2, ncol = 2,
+             cols = colors.samples)
+d
+pdf(paste0(outdir, "/8_DimPlot_umap_split_by_samples.pdf"),
+    width = 16, height = 9)
+d
+dev.off()
+```
+
+```{r}
+f <- FeaturePlot(integrated, features = c("Nphs2", "Slc5a2", "Clcnka", "Slc12a1", "Ptgs2", "Slc12a3", "Calb1", "Aqp2", "Slc4a1", "Slc26a4", "Slc14a2", "Upk1a", "Cd22", "Adgre1" , "Pecam1", "Pdgfrb", "Cd68", "Cd14", "Acta2", "Csf3r", "Cd4"), min.cutoff = "q9")
+f
+pdf(paste0(outdir, "/9_FeaturePlot_cellID.pdf")
+    , width = 28, height = 42)
+f
+dev.off()
+```
+##Annotation of markers based on cluster markers from Susztak Science paper (Park et al., Science 360, 758–763 (2018) and Kidney International (2019) 95, 787–796; https://doi.org/10.1016/
+
+https://science.sciencemag.org/content/360/6390/758.long
+https://www.kidney-international.org/article/S0085-2538(18)30912-8/fulltext
+
+#Podocyte markers
+```{r}
+f2 <- FeaturePlot(integrated, features = c("Nphs2", "Podxl"), min.cutoff = "q9")
+f2
+pdf(paste0(outdir, "/10_FeaturePlot_Podo.pdf")
+    , width = 14, height = 7)
+f2
+dev.off()
+```
+Cluster 19
+Clusters 4, 11, 16?
+
+#Endothelial markers
+```{r}
+f3 <- FeaturePlot(integrated, features = c("Plat", "Pecam1"), min.cutoff = "q9")
+f3
+pdf(paste0(outdir, "/11_FeaturePlot_Endo.pdf")
+    , width = 14, height = 7)
+f3
+dev.off()
+```
+Cluster 11
+Clusters 4, 16, 19?
+
+#PT-S1 markers
+```{r}
+f4 <- FeaturePlot(integrated, features = c("Slc5a2", "Slc5a12"), min.cutoff = "q9")
+f4
+pdf(paste0(outdir, "/12_FeaturePlot_PTs1.pdf")
+    , width = 14, height = 7)
+f4
+dev.off()
+```
+
+#PT-S2 markers
+```{r}
+f5 <- FeaturePlot(integrated, features = c("Fxyd2", "Hrsp12"), min.cutoff = "q9")
+f5
+pdf(paste0(outdir, "/12_FeaturePlot_PTs2.pdf")
+    , width = 10, height = 8)
+f5
+dev.off()
+```
+#PT-S3 markers
+```{r}
+f6 <- FeaturePlot(integrated, features = c("Atp11a", "Slc13a3"), min.cutoff = "q9")
+f6
+pdf(paste0(outdir, "/13_FeaturePlot_PTs3.pdf")
+    , width = 10, height = 8)
+f6
+dev.off()
+```
+#Loop of Henle
+```{r}
+f7 <- FeaturePlot(integrated, features = c("Slc12a1", "Umod"), min.cutoff = "q9")
+f7
+pdf(paste0(outdir, "/14_FeaturePlot_LOH.pdf")
+    , width = 10, height = 8)
+f7
+dev.off()
+```
+#Distal CT
+```{r}
+f8 <- FeaturePlot(integrated, features = c("Slc12a3", "Pvalb"), min.cutoff = "q9")
+f8
+pdf(paste0(outdir, "/15_FeaturePlot_DCT.pdf")
+    , width = 10, height = 8)
+f8
+dev.off()
+```
+#Conn Tubule
+```{r}
+f21 <- FeaturePlot(integrated, features = c("Calb1"), min.cutoff = "q9")
+f21
+pdf(paste0(outdir, "/29_FeaturePlot_ConnTub.pdf")
+    , width = 10, height = 8)
+f21
+dev.off()
+```
+
+
+#CD PC
+```{r}
+f9 <- FeaturePlot(integrated, features = c("Aqp2", "Hsd11b2"), min.cutoff = "q9")
+f9
+pdf(paste0(outdir, "/16_FeaturePlot_CD-PC.pdf")
+    , width = 10, height = 8)
+f9
+dev.off()
+```
+#CD-IC
+```{r}
+f10 <- FeaturePlot(integrated, features = c("Atp6v1g3", "Atp6v0d2"), min.cutoff = "q9")
+f10
+pdf(paste0(outdir, "/17_FeaturePlot_CD-IC.pdf")
+    , width = 10, height = 8)
+f10
+dev.off()
+```
+#CD Trans
+```{r}
+f11 <- FeaturePlot(integrated, features = c("Slc26a4", "Insrr", "Rhbg"), min.cutoff = "q9")
+f11
+pdf(paste0(outdir, "/18_FeaturePlot_CD-Trans.pdf")
+    , width = 10, height = 8)
+f11
+dev.off()
+```
+#Fibroblast
+```{r}
+f12 <- FeaturePlot(integrated, features = c("Plac8", "S100a4", "Pdgfrb"), min.cutoff = "q9")
+f12
+pdf(paste0(outdir, "/19_FeaturePlot_Fib.pdf")
+    , width = 10, height = 8)
+f12
+dev.off()
+```
+
+#Macro
+```{r}
+f13 <- FeaturePlot(integrated, features = c("C1qa", "Cd68", "C1qb"), min.cutoff = "q9")
+f13
+pdf(paste0(outdir, "/20_FeaturePlot_Macro.pdf")
+    , width = 10, height = 8)
+f13
+dev.off()
+```
+
+#PMN
+```{r}
+f14 <- FeaturePlot(integrated, features = c("S100a8", "Ly6g", "S100a9"), min.cutoff = "q9")
+f14
+pdf(paste0(outdir, "/21_FeaturePlot_PMN.pdf")
+    , width = 10, height = 8)
+f14
+dev.off()
+```
+#B lymph
+```{r}
+f15 <- FeaturePlot(integrated, features = c("Cd79a", "Cd79b", "Cd19"), min.cutoff = "q9")
+f15
+pdf(paste0(outdir, "/22_FeaturePlot_Blymph.pdf")
+    , width = 10, height = 8)
+f15
+dev.off()
+```
+#Tlymph
+```{r}
+f16 <- FeaturePlot(integrated, features = c("Ltb", "Cd4", "Cxcr6"), min.cutoff = "q9")
+f16
+pdf(paste0(outdir, "/23_FeaturePlot_Tlymph.pdf")
+    , width = 10, height = 8)
+f16
+dev.off()
+```
+#NK
+```{r}
+f17 <- FeaturePlot(integrated, features = c("Gzma", "Nkg7"), min.cutoff = "q9")
+f17
+pdf(paste0(outdir, "/24_FeaturePlot_NK.pdf")
+    , width = 10, height = 8)
+f17
+dev.off()
+```
+#Novel1
+```{r}
+f18 <- FeaturePlot(integrated, features = c("Slc27a2", "Lrp2", "Cdca3"), min.cutoff = "q9")
+f18
+pdf(paste0(outdir, "/25_FeaturePlot_Novel1.pdf")
+    , width = 10, height = 8)
+f18
+dev.off()
+```
+```{r}
+#library(Seurat)
+DefaultAssay(integrated) <- "RNA"
+clusters <- levels(integrated@active.ident)
+conserved.markers <- data.frame(matrix(ncol = 14))
+ for (c in clusters) {
+  print(c)
+  markers.c <- FindConservedMarkers(integrated, ident.1 = c, grouping.var = "sample.id", verbose = T)
+  markers.c <- cbind(data.frame(cluster = rep(c, dim(markers.c)[1])
+                                , gene = rownames(markers.c)), markers.c)
+  write.table(markers.c, file = paste0(outdir, "/11_markers_", c, ".txt"))
+  colnames(conserved.markers) <- colnames(markers.c)
+  conserved.markers <- rbind(conserved.markers, markers.c)
+  head(conserved.markers)
+}
+conserved.markers <- conserved.markers[-1, ]
+write.table(conserved.markers,
+            file = paste0(outdir, "/12_conserved.markers.tsv"),
+            quote = T,
+            sep = "\t",
+            col.names = NA)
+saveRDS(conserved.markers, paste0(outdir, "/12.conserved.markers.rds"))
+#conserved.markers <- readRDS("./2_MBP-clustering/12.conserved.markers.rds")
+```
+
+
+```{r}
+integrated <- RenameIdents(integrated, `0` = "PT-s3", `1` = "PT-s1", `2` = "PT-s2", 
+    `3` = "Endo", `4` = "CT", `5` = "PT-s3", `6` = "LOH", `7` = "Fib", `8` = "DCT", `9` = "CD-PC", 
+    `10` = "Macro", `11` = "CD-IC", `12` = "Lympho", `13` = "Novel", `14` = "Podo", `15` = "PMN")
+
+d2 <- DimPlot(integrated, label = TRUE, label.size = 8)
+d2
+pdf(paste0(outdir, "/32_Dimplot_newidents.pdf"))
+d2
+dev.off()
+
+```
+
+```{r}
+d3 <- DimPlot(integrated, group.by = "sample.id", split.by = "sample.id", pt.size = 0.2, ncol = 2)
+d3
+pdf(paste0(outdir, "/31_DimPlot_newidents_split_by_samples.pdf"),
+    width = 16, height = 9)
+d3
+dev.off()
+```
+
+# Identify cells expressing Il6
+```{r}
+DefaultAssay(integrated) <- "RNA"
+f19 <- FeaturePlot(integrated, features = "Il6", order = T, label = T, label.size = 6)
+f19
+pdf(paste0(outdir, "/26_FeaturePlot_Il6.pdf"))
+f19
+dev.off()
+```
+
+```{r}
+f20 <- FeaturePlot(integrated, features = c("Il6"), split.by = "sample.id", max.cutoff = 3, 
+    cols = c("grey", "red"))
+f20
+pdf(paste0(outdir, "/27_FeaturePlot_Il6-sham-CLP.pdf"))
+f20
+dev.off()
+```
+```{r}
+
+```
+
+
+```{r}
+library(ggplot2)
+library(cowplot)
+theme_set(theme_cowplot())
+integrated$celltype.stim <- paste(Idents(integrated), integrated$sample.id, sep = "_")
+integrated$celltype <- Idents(integrated)
+Idents(integrated) <- "celltype"
+
+```
+
+
+```{r}
+plots <- VlnPlot(integrated, features = c("Il6"), split.by = "sample.id", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+library(patchwork)
+wrap_plots(plots = plots, ncol = 1)
+```
+
+```{r}
+saveRDS(integrated, paste0(outdir, "/28.integrated.rds"))
+```
+
+## Session Information
+```{r}
+sessionInfo()
+```
+
+```{r}
+writeLines(capture.output(sessionInfo()), "./scripts/2_New_clustering/2_New_clustering.sessionInfo.txt")
+```

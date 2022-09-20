@@ -1,0 +1,280 @@
+---
+title: "Privratsky-20210215 - Resolution choice"
+author: "Hélène Fradin Kirshner"
+date: "02/25/2021"
+output: html_document
+---
+
+rmarkdown::render('./2_Resolution_choice/2_1_Resolution_choice.Rmd')
+
+Changes in myeloid and kidney cells after CLP - Analysis of 2 x 10X scRNA-seq samples from 2 pools of WT mice (3 Sham + 3 CLP): comparison of gene expression in different cell populations
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+                      echo=TRUE, warning=FALSE, message=FALSE, error=FALSE
+                      , tidy.opts=list(width.cutoff=60),tidy=TRUE
+                      , cache=TRUE)
+knitr::opts_knit$set(root.dir = '/data/omicscore/Privratsky-Privratsky-20210215')
+# knitr::opts_knit$set(root.dir = '~/Volumes/HARDAC-OmicsCore/Privratsky-Privratsky-20210215')
+```
+
+```{r}
+indir <- "./processedData/1_JP_analyses_results/Rerun_HARDAC_20210216/1_QC_filtering_metrics"
+outdir <- "./processedData/2_1_Resolution_choice"
+dir.create(outdir, recursive = T)
+```
+
+```{r}
+library(Seurat)
+filtered <- readRDS(paste0(indir, "/15.filtered.398.rds"))
+filtered
+```
+
+Normalize each sample individually and selected 2000 most variable genes between samples
+```{r}
+library(cowplot)
+list <- SplitObject(filtered, split.by = "sample.id")
+list <- lapply(X = list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+
+anchors <- FindIntegrationAnchors(object.list = list, dims = 1:20)
+integrated <- IntegrateData(anchorset = anchors, dims = 1:20)
+DefaultAssay(integrated) <- "integrated"
+integrated <- ScaleData(integrated, verbose = T)
+integrated
+```
+
+```{r}
+DefaultAssay(integrated) <- "integrated"
+integrated <- RunPCA(integrated, npcs = 50, verbose = FALSE)
+```
+
+```{r}
+integrated <- JackStraw(integrated, num.replicate = 100, dims = 50, verbose = T)
+saveRDS(integrated, paste0(outdir, "/1.integrated.rds"))
+# integrated <- readRDS("./processedData/2_IL1R_KO_vs_ctrl/1.integrated.56.rds")
+```
+
+```{r}
+integrated <- ScoreJackStraw(integrated, dims = 1:50)
+j <- JackStrawPlot(integrated, dims = 1:50)
+j
+pdf(paste0(outdir, "/2_JackStrawPlot.pdf"),
+    width = 10
+    , height = 8)
+j
+dev.off()
+```
+
+```{r}
+e <- ElbowPlot(integrated, ndims = 50)
+e
+pdf(paste0(outdir, "/3_ElbowPlot.pdf"))
+e
+dev.off()
+```
+
+```{r}
+integrated <- RunUMAP(integrated, dims = 1:50)
+integrated <- FindNeighbors(integrated, dims = 1:50)
+#0.4-1.2
+for (i in seq(0,3,0.1)) {
+  integrated <- FindClusters(integrated, resolution = i, verbose = F)
+}
+head(integrated[[]])
+```
+
+```{r}
+for (i in seq(0.2,0.3,0.01)) {
+  integrated <- FindClusters(integrated, resolution = i, verbose = F)
+}
+```
+
+```{r}
+# install.packages("clustree")
+library(clustree)
+c <- clustree(integrated, prefix = "integrated_snn_res.")
+c
+pdf(paste0(outdir, "/4_clustree.pdf"), width = 17, height = 22)
+c
+dev.off()
+```
+
+```{r}
+# install.packages("clustree")
+c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = "Il6", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/5_clustree_Il6.pdf"), width = 17, height = 22)
+c
+dev.off()
+```
+
+```{r}
+# install.packages("clustree")
+c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = "Il10", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/6_clustree_Il10.pdf"), width = 17, height = 22)
+c
+dev.off()
+```
+
+Cd11c = Itgax?
+```{r}
+# install.packages("clustree")
+c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = "Irf8", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/7_clustree_Irf8.pdf"), width = 17, height = 22)
+c
+dev.off()
+```
+
+```{r}
+saveRDS(integrated, paste0(outdir, "/8.integrated.rds"))
+# integrated <- readRDS("./processedData/2_IL1R_KO_vs_ctrl/1.integrated.56.rds")
+```
+
+```{r}
+DefaultAssay(integrated) <- "RNA"
+c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = "Itgax", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/9_clustree_Itgax_RNA.pdf"), width = 17, height = 22)
+c
+dev.off()
+```
+
+MHCII expression to separate from monocytes. Maybe use Ciita ? (Salei paper, p. 16 right before Discussion)
+```{r}
+c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = "Ciita", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/10_clustree_Ciita_RNA.pdf"), width = 17, height = 22)
+c
+dev.off()
+```
+
+Macrophage markers: C1qc, Cd81, Cd74, Apoe (see Zimmerman paper)
+Dendritic cells: Clec9a, Zbtb46, (Salei, Miller, and Brahler papers)
+
+```{r}
+macrophage.markers <- c("C1qc", "Cd81", "Cd74", "Apoe")
+macrophage.markers %in% rownames(integrated)
+macrophage.markers %in% rownames(integrated@assays$RNA)
+dc.markers <- c("Clec9a", "Zbtb46")
+dc.markers %in% rownames(integrated)
+dc.markers %in% rownames(integrated@assays$RNA)
+```
+
+```{r}
+for (marker in c(macrophage.markers, dc.markers)) {
+  if (marker %in% macrophage.markers) { cell.type = "marcophage" } else { cell.type = "DC"}
+  if (marker %in% rownames(integrated)) {
+    DefaultAssay(integrated) <- "integrated"
+    c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = marker, node_colour_aggr = "mean")
+    pdf(paste0(outdir, "/11_clustree_", cell.type, "_", marker, ".pdf"), width = 17, height = 22)
+    print(c)
+    dev.off()
+  } else if (marker %in% rownames(integrated@assays$RNA)) {
+    DefaultAssay(integrated) <- "RNA"
+    c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = marker, node_colour_aggr = "mean")
+    pdf(paste0(outdir, "/11_clustree_", cell.type, "_", marker, "_RNA.pdf"), width = 17, height = 22)
+    print(c)
+    dev.off()
+  }
+}
+```
+
+Using the stability index to assess clusters
+The stability index from the SC3 package (Kiselev et al. 2017) measures the stability of clusters across resolutions and is automatically calculated when a clustering tree is built.
+```{r}
+c <- clustree(integrated, prefix = "integrated_snn_res.", node_colour = "sc3_stability")
+pdf(paste0(outdir, "/12_clustree_integrated_prefix_integrated_snn_res_node_colour_sc3_stability.pdf"), width = 17, height = 22)
+c
+dev.off()
+```
+
+```{r}
+macrophage.markers <- c("C1qc", "Cd81", "Cd74", "Apoe")
+macrophage.markers %in% rownames(integrated)
+macrophage.markers %in% rownames(integrated@assays$RNA)
+dc.markers <- c("Clec9a", "Zbtb46")
+dc.markers %in% rownames(integrated)
+dc.markers %in% rownames(integrated@assays$RNA)
+```
+
+More markers
+Podocyte -> Nphs1 / Nphs2
+Endo, containing endothelial, vascular, and descending loop of Henle -> Nrp1
+Proximal convoluted tubes (PCT) - S1 -> Slc5a2
+Proximal tubules - S2 
+Proximal straight tubules (PST) - S3 -> Atp11a
+Loop of Henle -> Slc12a1
+Distal convoluted tubule (CT) -> Slc12a3
+Connecting tubule -> Calb1
+CD-PC, collecting duct principal cell -> Aqp2
+CD-IC, collecting duct intercalated cell
+CD-Trans, collecting duct transitional cell
+Fib, fibroblast -> Plac8 / Pdgfrb
+Macro, macrophage -> C1qa / Cd68
+
+Neutrophils, eosinophils, and basophils are PMNs
+Neutro, neutrophil -> S100a8
+
+B lymph, lymphocyte -> Cd79a
+T lymph, lymphocyte -> Cd4
+NK, natural killer cell
+
+Macula densa -> Ptgs2
+Granular cell of afferent arteriole -> Ren1
+Thin ascending limb -> Clcnka
+Basophil -> Cd69
+
+```{r}
+markers <- c("S100a8"
+             , "Nphs1", "Nphs2"
+             , "Nrp1"
+             , "Slc5a2"
+             , "Atp11a"
+             , "Slc12a1"
+             , "Slc12a3"
+             , "Calb1"
+             , "Aqp2"
+             , "Plac8", "Pdgfrb"
+             , "C1qa", "Cd68"
+             , "Cd79a"
+             , "Cd4"
+             , "Ptgs2", "Ren1", "Clcnka", "Cd69")
+for (marker in markers) {
+  if (marker %in% macrophage.markers) { cell.type = "marcophage" } else { cell.type = "DC"}
+  if (marker %in% rownames(integrated)) {
+    DefaultAssay(integrated) <- "integrated"
+    c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = marker, node_colour_aggr = "mean")
+    pdf(paste0(outdir, "/13_clustree_", cell.type, "_", marker, ".pdf"), width = 17, height = 22)
+    print(c)
+    dev.off()
+  } else if (marker %in% rownames(integrated@assays$RNA)) {
+    DefaultAssay(integrated) <- "RNA"
+    c <- clustree(integrated, prefix = "integrated_snn_res.",
+         node_colour = marker, node_colour_aggr = "mean")
+    pdf(paste0(outdir, "/13_clustree_", cell.type, "_", marker, "_RNA.pdf"), width = 17, height = 22)
+    print(c)
+    dev.off()
+  }
+}
+```
+
+## Session Information
+```{r}
+sessionInfo()
+```
+
+```{r}
+writeLines(capture.output(sessionInfo()), "./scripts/2_Resolution_choice/2_1_Resolution_choice.sessionInfo.txt")
+```

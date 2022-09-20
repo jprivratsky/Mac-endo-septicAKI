@@ -1,0 +1,352 @@
+---
+title: "Privratsky-20210215 - Differential expression analyses C24 vs. C0"
+author: "Hélène Fradin Kirshner"
+date: "04/05/2021"
+output: html_document
+---
+
+source conda/bin/activate privratsky
+rmarkdown::render('./7_DEA_C24_vs_C0/7_DEA_C24_vs_C0.Rmd')
+
+Changes in myeloid and kidney cells after CLP - Analysis of 2 x 10X scRNA-seq samples from 2 pools of WT mice (3 Sham + 3 CLP): comparison of gene expression in different cell populations
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+                      echo=TRUE, warning=FALSE, message=FALSE, error=FALSE
+                      , tidy.opts=list(width.cutoff=60),tidy=TRUE
+                      , cache=TRUE
+                      #, cache.lazy = FALSE
+                      )
+knitr::opts_knit$set(root.dir = '/data/omicscore/Privratsky-Privratsky-20210215')
+# knitr::opts_knit$set(root.dir = '~/Volumes/HARDAC-OmicsCore/Privratsky-Privratsky-20210215')
+```
+
+```{r}
+indir <- "./processedData/5_Clustering_res_0.5"
+outdir <- "./processedData/7_DEA_C24_vs_C0"
+dir.create(outdir, recursive = T)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+annotated <- readRDS(paste0(indir, "/37.annotated.rds"))
+annotated
+```
+
+```{r}
+library(openxlsx)
+library(Seurat)
+# library('unikn')
+library(gtools)
+```
+
+```{r}
+sample.id <- as.factor(annotated$sample.id)
+print(levels(sample.id))
+```
+
+```{r}
+table(annotated$sample.id)
+```
+
+```{r}
+dim(annotated)
+```
+
+```{r}
+annotated$annotated.1.sample.id <- paste(annotated$annotation.1, annotated$sample.id, sep="_")
+levels(factor(annotated$annotated.1.sample.id))
+```
+
+```{r, eval=FALSE}
+pair_all <- seecol("pal_unikn_pair")
+```
+
+```{r, eval=FALSE}
+library(RColorBrewer)
+paired <- brewer.pal(n = 12, name = "Paired")
+slices <- rep(1,length(paired))
+pie(slices, col=paired)
+```
+
+```{r, eval=FALSE}
+colors.cell.types.pair <- c(pair_all[c(2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11, 14, 13, 16, 15)], paired, "#FF8CFF", "#7D006F", "#DC8CFF", "#00007E", "#DEFF8C", "#007900")
+levels <- levels(as.factor(annotated$annotated.1.sample.id))
+names(colors.cell.types.pair) <- levels
+slices <- rep(1,length(levels))
+pie(slices, col=colors.cell.types.pair, labels = names(colors.cell.types.pair))
+```
+
+```{r}
+colors.samples <- c("#12999E", "#FDA908")
+names(colors.samples) <- levels(as.factor(annotated$sample.id))
+slices <- rep(1,length(colors.samples))
+pie(slices, col=colors.samples, labels = names(colors.samples))
+```
+
+# DIFFERENTIAL EXPRESSION ANALYSES
+
+differential expression studies for the following groups:
+1. C24 vs C0 within each cell type (from manual annotation annotation.1)
+
+# 1. C24 vs C0 within each cell type (from manual annotation annotation.1)
+
+```{r}
+library(ggsci)
+levels <- levels(annotated$annotation.1)
+colors.annotation.1 <- pal_ucscgb("default", alpha = 1)(26)[1:length(levels)]
+names(colors.annotation.1) <- levels
+colors.annotation.1
+slices <- rep(1,length(levels))
+pie(slices, col=colors.annotation.1, labels = names(colors.annotation.1))
+```
+
+```{r}
+d <-
+  DimPlot(
+    annotated,
+    reduction = "umap",
+    pt.size = 0.2,
+    label = T,
+    label.size = 5,
+    cols = colors.annotation.1,
+    group.by = "annotation.1"
+  )
+d
+pdf(
+  paste0(outdir,
+         "/1_DimPlot_umap_clusters_pc50_res.0.5_group_by_cell_types_annotation.1.pdf")
+  , width = 11
+  , height = 9
+)
+d
+dev.off()
+```
+
+```{r}
+DefaultAssay(annotated) <- "RNA"
+output <- paste0(outdir, "/2_DE_manual_annotation_C24_vs_C0_")
+levels(factor(annotated$annotated.1.sample.id))
+```
+
+```{r}
+for (cell.type in levels(factor(annotated$annotation.1))) {
+  try({
+    print(cell.type)
+    ident1 <- paste0(cell.type, "_C24")
+    ident2 <- paste0(cell.type, "_C0")
+    Idents(annotated) <- "annotated.1.sample.id"
+    condition.diffgenes <- FindMarkers(
+      annotated,
+      ident.1 = ident1,
+      ident.2 = ident2,
+      logfc.threshold = -Inf,
+      test.use = 'wilcox',
+      min.pct = -Inf,
+      verbose = T,
+      min.cells.feature = -Inf,
+      min.cells.group = -Inf
+    )
+    
+    condition.diffgenes.adjpval.0.05 <-
+      condition.diffgenes[condition.diffgenes$p_val_adj < 0.05, ]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <-
+      condition.diffgenes.adjpval.0.05[condition.diffgenes.adjpval.0.05$avg_log2FC > 0, ]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <-
+      condition.diffgenes.adjpval.0.05.upregulated.sorted[order(condition.diffgenes.adjpval.0.05.upregulated.sorted$avg_log2FC,
+                                                                decreasing = T), ]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <-
+      condition.diffgenes.adjpval.0.05[condition.diffgenes.adjpval.0.05$avg_log2FC < 0, ]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <-
+      condition.diffgenes.adjpval.0.05.downregulated.sorted[order(
+        condition.diffgenes.adjpval.0.05.downregulated.sorted$avg_log2FC,
+        decreasing = F
+      ), ]
+    list_of_datasets <-
+      list(
+        "sig.upregulated.genes.ordered.by.avg.logFC" = condition.diffgenes.adjpval.0.05.upregulated.sorted,
+        "sig.downregulated.genes.ordered.by.avg.logFC" = condition.diffgenes.adjpval.0.05.downregulated.sorted,
+        "all.genes.ordered.by.adj.pval" = condition.diffgenes
+      )
+    openxlsx::write.xlsx(list_of_datasets,
+               file = paste0(output,
+                             cell.type,
+                             ".xlsx"),
+               row.names = T)
+  })
+}
+```
+
+```{r}
+for (cell.type in levels(factor(annotated$annotation.1))) {
+  try({
+    print(cell.type)
+    filename <-paste0(output,
+                      cell.type,
+                      ".xlsx")
+    sheets <- openxlsx::getSheetNames(filename)
+    SheetList <- lapply(sheets,openxlsx::read.xlsx,xlsxFile=filename)
+    names(SheetList) <- sheets
+    
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <- SheetList[[1]]
+    rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted) <- condition.diffgenes.adjpval.0.05.upregulated.sorted[,1]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <- condition.diffgenes.adjpval.0.05.upregulated.sorted[, -1]
+    
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <- SheetList[[2]]
+    rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted) <- condition.diffgenes.adjpval.0.05.downregulated.sorted[,1]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <- condition.diffgenes.adjpval.0.05.downregulated.sorted[, -1]
+    
+    
+    Idents(annotated) <- "annotation.1"
+    
+    try({f <-
+      FeaturePlot(
+        annotated,
+        features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1],
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90"
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_FeaturePlot_top_upregulated_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({f <-
+      FeaturePlot(
+        annotated,
+        features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1],
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90"
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_FeaturePlot_top_downregulated_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        annotated,
+        features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1],
+        group.by = "annotation.1",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_VlnPlot_top_upregulated_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        annotated,
+        features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1],
+        group.by = "annotation.1",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_VlnPlot_top_downregulated_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+    
+    ## DotPlot with 50 most upregulated genes
+    Idents(annotated) <- "annotated.1.sample.id"
+    try({d <- DotPlot(
+      annotated,
+      features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1:50],
+      cols = c("#03539C", "#E82564"),
+      dot.scale = 8,
+      group.by = "annotated.1.sample.id"
+    ) + RotatedAxis()
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_DotPlot_top50_upregulated_groupby_annotation.1.sample.id.pdf"
+      ),
+      width = ( 4 + min(50, length(rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted))) * 15 / 50 ),
+      height = 17
+    )
+    print(d)
+    dev.off()
+    })
+    
+    ## DotPlot with 50 most downregulated genes
+    Idents(annotated) <- "annotated.1.sample.id"
+    try({d <- DotPlot(
+      annotated,
+      features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1:50],
+      cols = c("#03539C", "#E82564"),
+      dot.scale = 8,
+      group.by = "annotated.1.sample.id"
+    ) + RotatedAxis()
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_DotPlot_top50_downregulated_groupby_annotation.1.sample.id.pdf"
+      ),
+      width = ( 4 + min(50, length(rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted))) * 15 / 50 ),
+      height = 17
+    )
+    print(d)
+    dev.off()
+    })
+  })
+}
+```
+
+```{r}
+saveRDS(annotated, paste0(outdir, "/3.annotated.rds"))
+```
+
+## Session Information
+```{r}
+sessionInfo()
+```
+
+```{r}
+writeLines(capture.output(sessionInfo()), "./scripts/7_DEA_C24_vs_C0/7_DEA_C24_vs_C0.sessionInfo.txt")
+```

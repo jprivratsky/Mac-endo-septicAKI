@@ -1,0 +1,2303 @@
+---
+title: "Privratsky-20210215 - Sub cluster the “Macro” population"
+author: "Hélène Fradin Kirshner"
+date: "04/13/2021"
+output: html_document
+---
+
+source conda/bin/activate privratsky
+rmarkdown::render('./9_Subcluster_Macrophages/9_Subcluster_Macrophages.Rmd')
+
+Changes in myeloid and kidney cells after CLP - Analysis of 2 x 10X scRNA-seq samples from 2 pools of WT mice (3 Sham + 3 CLP): comparison of gene expression in different cell populations
+
+Upregulation of anti-inflammatory mediators in macrophage population (SOCS3, IL-1R2, IL1rn) and downregulation of pro-inflammatory genes
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+                      echo=TRUE, warning=FALSE, message=FALSE, error=FALSE
+                      , tidy.opts=list(width.cutoff=60),tidy=TRUE
+                      , cache=TRUE
+                      #, cache.lazy = FALSE
+                      )
+knitr::opts_knit$set(root.dir = '/data/omicscore/Privratsky-Privratsky-20210215')
+# knitr::opts_knit$set(root.dir = '~/Volumes/HARDAC-OmicsCore/Privratsky-Privratsky-20210215')
+```
+
+```{r}
+indir <- "./processedData/7_DEA_C24_vs_C0"
+outdir <- "./processedData/9_Subcluster_Macrophages"
+dir.create(outdir, recursive = T)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+annotated <- readRDS(paste0(indir, "/3.annotated.rds"))
+annotated
+```
+
+# Subset to Macrophages and sub-cluster
+
+```{r}
+annotated
+Idents(annotated) <- "annotation.1"
+macrophages <- subset(annotated, idents = "Macro")
+macrophages
+```
+
+```{r}
+table(macrophages$annotation.1)
+```
+
+```{r}
+DefaultAssay(macrophages) <- "RNA"
+macrophages.list <- SplitObject(macrophages, split.by = "sample.id")
+macrophages.list
+```
+
+```{r}
+for (i in 1:length(macrophages.list)) {
+  macrophages.list[[i]] <- FindVariableFeatures(macrophages.list[[i]]
+                                                       , selection.method = "vst"
+                                                       , nfeatures = 2000
+                                                       , verbose = FALSE)
+}
+```
+
+```{r}
+k.filter <- min(200, min(sapply(macrophages.list, ncol)))
+k.filter
+```
+
+```{r}
+macrophages.anchors <- FindIntegrationAnchors(object.list = macrophages.list, dims = 1:30, k.filter = k.filter)
+```
+
+```{r}
+macrophages.integrated <- IntegrateData(anchorset = macrophages.anchors, dims = 1:30)
+```
+   
+```{r}
+DefaultAssay(macrophages.integrated) <- "integrated"
+macrophages.integrated <- ScaleData(macrophages.integrated, verbose = T)
+```
+
+```{r}
+dim(macrophages.integrated)
+```
+
+```{r}
+macrophages.integrated <- RunPCA(macrophages.integrated, npcs = 50, verbose = T)
+```
+
+```{r}
+system.time(macrophages.integrated <- JackStraw(macrophages.integrated, num.replicate = 100,
+dims = 50))
+macrophages.integrated <- ScoreJackStraw(macrophages.integrated, dims = 1:50)
+j <- JackStrawPlot(macrophages.integrated, dims = 1:50)
+pdf(paste0(outdir, "/1_JackStrawPlot_macrophages.pdf"))
+j
+dev.off()
+```
+
+```{r}
+macrophages.integrated <- FindNeighbors(macrophages.integrated, dims = 1:50)
+macrophages.integrated <- RunUMAP(macrophages.integrated, dims = 1:50)
+```
+
+```{r}
+for (i in seq(0,2,0.1)) {
+  macrophages.integrated <- FindClusters(macrophages.integrated, resolution = i, verbose = F)
+  macrophages.integrated[[paste0("macrophages_subclusters_res.", i)]] <- macrophages.integrated$seurat_clusters
+}
+```
+
+```{r}
+head(macrophages.integrated[[]])
+```
+
+```{r}
+# install.packages("clustree")
+library(clustree)
+c <- clustree(macrophages.integrated, prefix = "macrophages_subclusters_res.")
+c
+pdf(paste0(outdir, "/2_clustree_macrophages.pdf"))
+c
+dev.off()
+```
+
+Using the stability index to assess clusters
+The stability index from the SC3 package (Kiselev et al. 2017) measures the stability of clusters across resolutions and is automatically calculated when a clustering tree is built.
+```{r}
+c <- clustree(macrophages.integrated, prefix = "macrophages_subclusters_res.", node_colour = "sc3_stability")
+pdf(paste0(outdir, "/3_clustree_macrophages_sc3_stability.pdf"))
+c
+dev.off()
+```
+
+SOCS3, IL-1R2, IL1rn
+=
+Socs3, Il1r2, Il1rn
+
+```{r}
+c <- clustree(macrophages.integrated, prefix = "macrophages_subclusters_res.",
+         node_colour = "Socs3", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/4_clustree_macrophages_Socs3.pdf"))
+c
+dev.off()
+```
+
+```{r}
+c <- clustree(macrophages.integrated, prefix = "macrophages_subclusters_res.",
+         node_colour = "Il1r2", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/5_clustree_macrophages_Il1r2.pdf"))
+c
+dev.off()
+```
+
+```{r}
+c <- clustree(macrophages.integrated, prefix = "macrophages_subclusters_res.",
+         node_colour = "Il1rn", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/6_clustree_macrophages_Il1rn.pdf"))
+c
+dev.off()
+```
+
+# RES 0.3
+
+```{r}
+# install.packages("Polychrome")
+library(Polychrome)
+set.seed(5658807) # for reproducibility
+levels <- levels(as.factor(macrophages.integrated$macrophages_subclusters_res.0.3))
+rainbow2.6c <- c("#03539C", "#12999E", "#B7CE05", "#FAEB09", "#FDA908", "#E82564")
+colors.macrophages.subclusters <- createPalette(length(levels), rainbow2.6c, M=1000)
+names(colors.macrophages.subclusters) <- levels
+colors.macrophages.subclusters
+slices <- rep(1,length(colors.macrophages.subclusters))
+pie(slices, col=colors.macrophages.subclusters, labels = names(colors.macrophages.subclusters))
+```
+
+```{r}
+Idents(macrophages.integrated) <- "macrophages_subclusters_res.0.3"
+DimPlot(macrophages.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 8, cols = colors.macrophages.subclusters)
+pdf(paste0(outdir, "/7_DimPlot_umap_macrophages_subclusters_res.0.3.pdf"))
+DimPlot(macrophages.integrated, reduction = "umap", pt.size = 0.5, label = T, label.size = 6, cols = colors.macrophages.subclusters)
+dev.off()
+```
+
+```{r}   
+colors.samples <- c("#12999E", "#FDA908")
+names(colors.samples) <- c("C0", "C24")
+macrophages.integrated$sample.id <- factor(macrophages.integrated$sample.id, levels = names(colors.samples))
+p <- DimPlot(macrophages.integrated, reduction = "umap", group.by = "sample.id"
+             , cols = colors.samples
+             , label = F)
+pdf(paste0(outdir, "/8_UMAP_macrophages_samples.pdf")
+    , width = 10
+    , height = 9)
+p
+dev.off()
+pdf(paste0(outdir, "/9_UMAP_macrophages_samples_noLegend.pdf")
+    , width = 7
+    , height = 7)
+p + NoLegend()
+dev.off()
+```
+
+# Rename subclusters
+```{r}
+new.cluster.ids <- paste0("Macro", 1:length(levels(as.factor(macrophages.integrated$macrophages_subclusters_res.0.3))))
+names(new.cluster.ids) <- levels(macrophages.integrated)
+macrophages.integrated <- RenameIdents(macrophages.integrated, new.cluster.ids)
+macrophages.integrated[["renamed.macrophages.subclusters"]] <- macrophages.integrated@active.ident
+```
+
+```{r}
+Idents(macrophages.integrated) <- "renamed.macrophages.subclusters"
+names(colors.macrophages.subclusters) <- levels(macrophages.integrated$renamed.macrophages.subclusters)
+DimPlot(macrophages.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 8, cols = colors.macrophages.subclusters)
+pdf(paste0(outdir, "/10_DimPlot_umap_renamed_macrophages_subclusters.pdf"))
+DimPlot(macrophages.integrated, reduction = "umap", pt.size = 0.5, label = T, label.size = 6, cols = colors.macrophages.subclusters)
+dev.off()
+```
+
+```{r}
+Idents(macrophages.integrated) <- "renamed.macrophages.subclusters"
+DimPlot(macrophages.integrated, reduction = "umap", pt.size = 1, label = F, label.size = 8, cols = colors.macrophages.subclusters) + NoLegend()
+pdf(paste0(outdir, "/11_DimPlot_umap_renamed_macrophages_subclusters_noLabels_noLegend.pdf"))
+DimPlot(macrophages.integrated, reduction = "umap", pt.size = 0.5, label = F, label.size = 6, cols = colors.macrophages.subclusters) + NoLegend()
+dev.off()
+```
+
+```{r}
+saveRDS(macrophages.integrated, paste0(outdir, "/12.macrophages.integrated.rds"))
+```
+
+# Conserved markers
+
+```{r}
+t <- table(macrophages.integrated$renamed.macrophages.subclusters, macrophages.integrated$sample.id)
+t
+openxlsx::write.xlsx(as.data.frame.matrix(t)
+                     , file = paste0(outdir, "/13_Sample_macrophages_subcluster_composition.xlsx")
+                     , rowNames = T
+                     , colNames = T)
+```
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+Idents(macrophages.integrated) <- "renamed.macrophages.subclusters"
+subclusters <- levels(as.factor(macrophages.integrated$renamed.macrophages.subclusters))
+conserved.markers <- data.frame(matrix(ncol = 14))
+for (c in subclusters) {
+  print(c)
+  markers.c <- FindConservedMarkers(macrophages.integrated, ident.1 = c, grouping.var = "sample.id", verbose = T
+                                    , logfc.threshold = -Inf
+                                    , min.pct = -Inf
+                                    , min.cells.feature = -Inf
+                                    , min.cells.group = -Inf)
+  markers.c <- cbind(data.frame(cluster = rep(c, dim(markers.c)[1])
+                                , gene = rownames(markers.c)), markers.c)
+  write.table(markers.c, file = paste0(outdir, "/14_markers_", c, "_macrophages_subclusters.txt"))
+  colnames(conserved.markers) <- colnames(markers.c)
+  conserved.markers <- rbind(conserved.markers, markers.c)
+}
+```
+
+```{r, eval=FALSE}
+# for (c in 1:4) {
+#   subcluster <- paste0("AM", c)
+#   markers.c <- read.table(file = paste0(outdir, "/31_markers_", subcluster, "_AM_subclusters.txt"))
+#   colnames(conserved.markers) <- colnames(markers.c)
+#   conserved.markers <- rbind(conserved.markers, markers.c)
+# }
+# head(conserved.markers)
+```
+
+```{r, eval=FALSE}
+# markers.AM5 <- read.table(file = paste0(outdir, "/31_markers_", "AM5", "_AM_subclusters.txt"))
+# colnames(markers.AM5)
+# colnames(conserved.markers)
+```
+
+```{r, eval=FALSE}
+# for ( i in 1:10 ) {
+#   markers.AM5[, 34+i] <- rep(NA, dim(markers.AM5)[1])
+# }
+# markers.AM5 <- markers.AM5[, c(1:12, 35:44, 13:34)]
+# colnames(markers.AM5) <- colnames(conserved.markers)
+# head(markers.AM5)
+```
+
+```{r, eval=FALSE}
+# conserved.markers <- rbind(conserved.markers, markers.AM5)
+```
+
+```{r}
+conserved.markers <- conserved.markers[-1, ]
+conserved.markers <- conserved.markers[, c(1:2, 13:14, 3:12)]
+head(conserved.markers)
+```
+
+Only top markers that are positive markers
+```{r}
+conserved.markers$marker.type <- apply(conserved.markers, 1, function(x) {
+  y <- as.numeric(x)
+  if ( (if (is.na(y[6])) {TRUE} else {y[6]>0})
+       & (if (is.na(y[11])) {TRUE} else {y[11]>0})
+       # & (if (is.na(y[16])) {TRUE} else {y[16]>0})
+       # & (if (is.na(y[21])) {TRUE} else {y[21]>0})
+       # & (if (is.na(y[26])) {TRUE} else {y[26]>0})
+       # & (if (is.na(y[31])) {TRUE} else {y[31]>0})
+       # & (if (is.na(y[36])) {TRUE} else {y[36]>0})
+       # & (if (is.na(y[41])) {TRUE} else {y[41]>0})
+       )
+    {"POS"}
+  else if ( ( if (is.na(y[6])) {TRUE} else {y[6]<0})
+       & (if (is.na(y[11])) {TRUE} else {y[11]<0})
+       # & (if (is.na(y[16])) {TRUE} else {y[16]<0})
+       # & (if (is.na(y[21])) {TRUE} else {y[21]<0})
+       # & (if (is.na(y[26])) {TRUE} else {y[26]<0})
+       # & (if (is.na(y[31])) {TRUE} else {y[31]<0})
+       # & (if (is.na(y[36])) {TRUE} else {y[36]<0})
+       # & (if (is.na(y[41])) {TRUE} else {y[41]<0})
+       ) 
+    {"NEG"}
+  else {"UND"}
+  })
+conserved.markers <- conserved.markers[, c(1:4, 15, 5:14)]
+```
+
+```{r}
+openxlsx::write.xlsx(conserved.markers, paste0(outdir, "/15_conserved_markers_macrophages.xlsx")
+                     , colNames = T)
+head(conserved.markers)
+```
+
+```{r}
+saveRDS(macrophages.integrated, paste0(outdir, "/16.macrophages.integrated.rds"))
+```
+
+```{r}
+conserved.markers.pos <- conserved.markers[conserved.markers$marker.type == "POS", ]
+head(conserved.markers.pos)
+```
+
+```{r}
+table(macrophages.integrated$sample.id)
+colnames(conserved.markers.pos)
+```
+
+```{r}
+library(dplyr)
+top1.pos <- conserved.markers.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -minimump_p_val)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -max_pval)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = C24_avg_log2FC)
+head(top1.pos)
+```
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+f <- FeaturePlot(macrophages.integrated, features = top1.pos$gene, min.cutoff = "q9", order = T, label = T
+                 , label.size = 8, repel = T)
+f
+pdf(paste0(outdir, "/17_FeaturePlot_top_pos_markers_macrophages.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+# DotPlot of top markers
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.integrated
+        , features = top1.pos$gene
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 8
+        , group.by = "renamed.macrophages.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/18_DotPlot_top_cell_types_pos_markers_clusters.macrophages.pdf")
+    , width = 7
+    , height = 7)
+d
+dev.off()
+```
+
+# DotPlot of top 10 markers
+
+```{r}
+library(dplyr)
+top10.pos <- conserved.markers.pos %>% group_by(cluster) %>% top_n(n = 10, wt = -minimump_p_val)
+top10.pos <- top10.pos %>% group_by(cluster) %>% top_n(n = 10, wt = -max_pval)
+top10.pos <- top10.pos %>% group_by(cluster) %>% top_n(n = 10, wt = C24_avg_log2FC)
+head(top10.pos)
+```
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.integrated
+        , features = top10.pos$gene
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 8
+        , group.by = "renamed.macrophages.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/19_DotPlot_top10_cell_types_pos_markers_clusters.macrophages.pdf")
+    , width = 14
+    , height = 7)
+d
+dev.off()
+```
+
+## Segregation of clusters by various sources of uninteresting variation
+Explore additional metrics, such as the number of UMIs and genes per cell, and mitochondrial gene expression by UMAP.
+```{r}
+# Determine metrics to plot present in tcells.integrated@meta.data
+metrics <-  c("nCount_RNA", "nFeature_RNA", "percent.mito")
+
+f <- FeaturePlot(macrophages.integrated, 
+            reduction = "umap", 
+            features = metrics,
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+f
+pdf(paste0(outdir, "/20_FeaturePlot_macrophages.integrated_umap_metrics.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+# Heatmap
+
+```{r}
+macrophages.integrated <- ScaleData(macrophages.integrated, verbose = T
+                                , features = rownames(macrophages.integrated))
+d <- DoHeatmap(macrophages.integrated, features = top10.pos$gene
+               , group.by = "renamed.macrophages.subclusters"
+               , group.colors = colors.macrophages.subclusters) + NoLegend()
+d
+pdf(paste0(outdir, "/21_DoHeatmap_top10_pos_macrophages.pdf")
+    , width = 15
+    , height = 13)
+d
+dev.off()
+```
+
+# DotPlot with known/useful markers
+
+```{r}
+immune.cells <- c("Ptprc", "Spi1", "Cd3g")
+b.cells <- c("Cd19", "Cd79a", "Cd79b")
+t.cells <- "Cd3e"
+nk.cells <- c("Ncr1")
+myeloid.cells <- "Cd68"
+neutrophils <- c("Csf3r", "S100a8", "S100a9", "Retnlg")
+monocytes.macrophages.dendritic.cells <- "Csf1r"
+dc <- c("Siglech", "Cd209a")
+dc1 <- "Xcr1"
+dc2 <- c("Ccl18", "Nr4a3", "Tnfsf12")
+dc3 <- "Fscn1"
+pdc <- "Tcf4"
+monocytes <- c("Ly6c1", "Ly6c2", "Ccr2", "Cx3cr1", "Fcgr4")
+macrophages <- c("Mrc1", "Lyz2", "Adgre1", "Axl", "Cxcl2", "Trem2", "C1qc", "Fcgr1", "C5ar1")
+am.markers <- c("Pparg", "Itgax", "Ear1", "Ear2", "Ear3", "Car4", "Siglec5", "SiglecF")
+im.markers <- c("Itgam", "Cx3cr1", "Ccl12", "Bhlme40", "Trem2", "Cxcl12", "Csf1")
+peribronchial.macrophages <- c("Ccr2", "Bhlhe40", "Bhlhe41")
+perivascular.macrophages <- c("Lyve1", "F13a1")
+proliferating.cells <- "Mki67"
+mesenchymal.cells <- c("Col1a1", "Col1a2", "Pdgfra")
+epithelial.cells <- c("Epcam", "Cdh1")
+mast.cells <- "Mcpt8"
+endothelial.cells <- c("Pecam1", "Emcn")
+```
+
+```{r}
+markers <- unique(c(immune.cells, b.cells, t.cells, nk.cells, myeloid.cells, neutrophils, monocytes.macrophages.dendritic.cells, dc, dc1, dc2, dc3, pdc, monocytes, macrophages, am.markers, im.markers, peribronchial.macrophages, perivascular.macrophages, proliferating.cells, mesenchymal.cells, epithelial.cells, mast.cells, endothelial.cells))
+```
+
+# Dot plot
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.integrated
+        , features = markers
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 15
+        , group.by = "renamed.macrophages.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/22_DotPlot_known_markers_macrophages.pdf")
+    , width = 18
+    , height = 4)
+d
+dev.off()
+```
+
+# Expression of genes of interest: Socs3, Il1r2, Il1rn
+```{r}
+goi <- c("Socs3", "Il1r2", "Il1rn")
+```
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+f <- FeaturePlot(macrophages.integrated, features = goi, min.cutoff = "q9", order = T, label = T
+                 , label.size = 8, repel = T)
+f
+pdf(paste0(outdir, "/23_FeaturePlot_goi_macrophages.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.integrated
+        , features = goi
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 15
+        , group.by = "renamed.macrophages.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/24_DotPlot_goi_macrophages.pdf")
+    , width = 6
+    , height = 4)
+d
+dev.off()
+```
+
+# DIFFERENTIAL EXPRESSION ANALYSES
+
+differential expression studies for the following groups:
+1. C24 vs C0 within each cell type (from manual annotation annotation.1)
+
+# 1. C24 vs C0 within each cell type (from manual annotation annotation.1)
+
+```{r}
+macrophages.integrated$renamed.macrophages.subclusters.sample.id <- paste(macrophages.integrated$renamed.macrophages.subclusters, macrophages.integrated$sample.id, sep="_")
+levels(factor(macrophages.integrated$renamed.macrophages.subclusters.sample.id))
+```
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+output <- paste0(outdir, "/25_DE_macrophages_subclusters_C24_vs_C0_")
+levels(factor(macrophages.integrated$renamed.macrophages.subclusters.sample.id))
+```
+
+```{r}
+for (cell.type in levels(factor(macrophages.integrated$renamed.macrophages.subclusters))) {
+  try({
+    print(cell.type)
+    ident1 <- paste0(cell.type, "_C24")
+    ident2 <- paste0(cell.type, "_C0")
+    Idents(macrophages.integrated) <- "renamed.macrophages.subclusters.sample.id"
+    condition.diffgenes <- FindMarkers(
+      macrophages.integrated,
+      ident.1 = ident1,
+      ident.2 = ident2,
+      logfc.threshold = -Inf,
+      test.use = 'wilcox',
+      min.pct = -Inf,
+      verbose = T,
+      min.cells.feature = -Inf,
+      min.cells.group = -Inf
+    )
+    
+    condition.diffgenes.adjpval.0.05 <-
+      condition.diffgenes[condition.diffgenes$p_val_adj < 0.05, ]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <-
+      condition.diffgenes.adjpval.0.05[condition.diffgenes.adjpval.0.05$avg_log2FC > 0, ]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <-
+      condition.diffgenes.adjpval.0.05.upregulated.sorted[order(condition.diffgenes.adjpval.0.05.upregulated.sorted$avg_log2FC,
+                                                                decreasing = T), ]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <-
+      condition.diffgenes.adjpval.0.05[condition.diffgenes.adjpval.0.05$avg_log2FC < 0, ]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <-
+      condition.diffgenes.adjpval.0.05.downregulated.sorted[order(
+        condition.diffgenes.adjpval.0.05.downregulated.sorted$avg_log2FC,
+        decreasing = F
+      ), ]
+    list_of_datasets <-
+      list(
+        "sig.upregulated.genes.ordered.by.avg.logFC" = condition.diffgenes.adjpval.0.05.upregulated.sorted,
+        "sig.downregulated.genes.ordered.by.avg.logFC" = condition.diffgenes.adjpval.0.05.downregulated.sorted,
+        "all.genes.ordered.by.adj.pval" = condition.diffgenes
+      )
+    openxlsx::write.xlsx(list_of_datasets,
+               file = paste0(output,
+                             cell.type,
+                             ".xlsx"),
+               row.names = T)
+  })
+}
+```
+
+```{r}
+for (cell.type in levels(factor(macrophages.integrated$renamed.macrophages.subclusters))) {
+  try({
+    print(cell.type)
+    filename <-paste0(output,
+                      cell.type,
+                      ".xlsx")
+    sheets <- openxlsx::getSheetNames(filename)
+    SheetList <- lapply(sheets,openxlsx::read.xlsx,xlsxFile=filename)
+    names(SheetList) <- sheets
+    
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <- SheetList[[1]]
+    rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted) <- condition.diffgenes.adjpval.0.05.upregulated.sorted[,1]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <- condition.diffgenes.adjpval.0.05.upregulated.sorted[, -1]
+    
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <- SheetList[[2]]
+    rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted) <- condition.diffgenes.adjpval.0.05.downregulated.sorted[,1]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <- condition.diffgenes.adjpval.0.05.downregulated.sorted[, -1]
+    
+    
+    Idents(annotated) <- "renamed.macrophages.subclusters"
+    
+    try({f <-
+      FeaturePlot(
+        macrophages.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1],
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90"
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_FeaturePlot_top_upregulated_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({f <-
+      FeaturePlot(
+        macrophages.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1],
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90"
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_FeaturePlot_top_downregulated_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1],
+        group.by = "renamed.macrophages.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_VlnPlot_top_upregulated_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1],
+        group.by = "renamed.macrophages.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_VlnPlot_top_downregulated_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+    
+    ## DotPlot with 50 most upregulated genes
+    Idents(macrophages.integrated) <- "renamed.macrophages.subclusters.sample.id"
+    try({d <- DotPlot(
+      macrophages.integrated,
+      features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1:50],
+      cols = c("#03539C", "#E82564"),
+      dot.scale = 8,
+      group.by = "renamed.macrophages.subclusters.sample.id"
+    ) + RotatedAxis()
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_DotPlot_top50_upregulated_groupby_annotation.1.sample.id.pdf"
+      ),
+      width = ( 4 + min(50, length(rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted))) * 15 / 50 ),
+      height = 17
+    )
+    print(d)
+    dev.off()
+    })
+    
+    ## DotPlot with 50 most downregulated genes
+    Idents(macrophages.integrated) <- "renamed.macrophages.subclusters.sample.id"
+    try({d <- DotPlot(
+      macrophages.integrated,
+      features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1:50],
+      cols = c("#03539C", "#E82564"),
+      dot.scale = 8,
+      group.by = "renamed.macrophages.subclusters.sample.id"
+    ) + RotatedAxis()
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_DotPlot_top50_downregulated_groupby_annotation.1.sample.id.pdf"
+      ),
+      width = ( 4 + min(50, length(rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted))) * 15 / 50 ),
+      height = 17
+    )
+    print(d)
+    dev.off()
+    })
+  })
+}
+```
+
+# Plots for genes of interest
+
+```{r}
+for (gene in goi) {
+  try({
+    Idents(macrophages.integrated) <- "renamed.macrophages.subclusters"
+    try({f <-
+      FeaturePlot(
+        macrophages.integrated,
+        features = gene,
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90",
+        label = T
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/26_",
+        gene,
+        "_FeaturePlot_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.integrated,
+        features = gene,
+        group.by = "renamed.macrophages.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/27_",
+        gene,
+        "_VlnPlot_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+  })    
+}
+
+
+Idents(macrophages.integrated) <- "renamed.macrophages.subclusters.sample.id"
+try({d <- DotPlot(
+  macrophages.integrated,
+  features = goi,
+  cols = c("#03539C", "#E82564"),
+  dot.scale = 8,
+  group.by = "renamed.macrophages.subclusters.sample.id"
+) + RotatedAxis()
+pdf(
+  paste0(
+    outdir,
+    "/28_",
+    paste(goi, sep = "_") ,
+    "_DotPlot_groupby_annotation.1.sample.id.pdf"
+  ),
+  width = ( 4 + length(goi) * 15 / 50 ),
+  height = 17
+)
+print(d)
+dev.off()
+})
+```
+
+# Plots for more genes of interest: F480 (antibody), CD11b, CD11c, CD64, MHCII
+In mouse: 
+F4/80 (antibody) > Emr1, Adgre1
+CD11b -> Itgam
+CD11c -> Itgax
+CD64 -> Fcgr1
+MHCII -> H2-Ab
+
+```{r}
+goi <- c("Adgre1", "Itgam", "Itgax", "Fcgr1", "H2-Ab1")
+```
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+for (gene in goi) {
+  c <- clustree(macrophages.integrated, prefix = "macrophages_subclusters_res.",
+                node_colour = gene, node_colour_aggr = "mean")
+  pdf(paste0(outdir, "/29_clustree_", gene, "_macrophages.pdf"))
+  print(c)
+  dev.off()
+}
+```
+
+```{r}
+for (gene in goi) {
+  try({
+    Idents(macrophages.integrated) <- "renamed.macrophages.subclusters"
+    try({f <-
+      FeaturePlot(
+        macrophages.integrated,
+        features = gene,
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90",
+        label = T
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/30_",
+        gene,
+        "_FeaturePlot_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.integrated,
+        features = gene,
+        group.by = "renamed.macrophages.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/31_",
+        gene,
+        "_VlnPlot_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+  })    
+}
+
+
+Idents(macrophages.integrated) <- "renamed.macrophages.subclusters.sample.id"
+try({d <- DotPlot(
+  macrophages.integrated,
+  features = goi,
+  cols = c("#03539C", "#E82564"),
+  dot.scale = 8,
+  group.by = "renamed.macrophages.subclusters.sample.id"
+) + RotatedAxis()
+pdf(
+  paste0(
+    outdir,
+    "/32_",
+    paste(goi, sep = "_") ,
+    "_DotPlot_groupby_macrophages_subclusters.sample.id.pdf"
+  ),
+  width = ( 4 + length(goi) * 15 / 50 ),
+  height = 17
+)
+print(d)
+dev.off()
+})
+```
+
+# Expression of marker Tim3/Havcr2 from reference Hasegawa 2021
+https://jasn.asnjournals.org/content/early/2021/04/17/ASN.2020121723
+
+```{r}
+DefaultAssay(macrophages.integrated) <- "RNA"
+Idents(macrophages.integrated) <- "renamed.macrophages.subclusters"
+f <- FeaturePlot(macrophages.integrated, features = "Havcr2", min.cutoff = "q9", order = T, label = T
+                 , label.size = 8, repel = T)
+f
+pdf(paste0(outdir, "/33_FeaturePlot_Havcr2_macrophages.pdf")
+    , width = 7
+    , height = 7)
+f
+dev.off()
+```
+
+# QC metrics to possibly remove high mitochondrial expression cells
+
+```{r}
+v <- VlnPlot(macrophages.integrated, features = c("nFeature_RNA", "nCount_RNA", "percent.mito"), ncol = 3, cols = colors.samples, group.by = "sample.id")
+v
+pdf(paste0(outdir, "/34_Seurat_QC_VlnPlot_samples.pdf"),
+    width = 21, height = 7)
+v
+dev.off()
+```
+
+```{r}
+summary(macrophages.integrated$percent.mito)
+```
+
+20% seems like a reasonable threshold
+Jamie: Regarding your other question, I do think having a lower threshold for mitochondrial genes would be good in the macrophage subpopulations.  I think the high mitochondrial content is mainly applicable to the tubular epithelial clusters.
+
+### First clean up of the subset by removing:
+#### - genes that are not expressed in any cell
+
+```{r}
+dim(macrophages.integrated)
+```
+
+```{r}
+keep_feature <- rowSums(as.matrix(GetAssayData(macrophages.integrated, slot = "counts"))) > 0
+summary(keep_feature)
+```
+#### - cells in which no gene expression is detected
+```{r}
+keep_cell <- colSums(as.matrix(GetAssayData(macrophages.integrated, slot = "counts"))) > 0
+summary(keep_cell)
+```
+
+```{r}
+macrophages.integrated.filtered <- macrophages.integrated[keep_feature, keep_cell]
+dim(macrophages.integrated.filtered)
+```
+
+# Remove cells with mito expn > 20%
+
+```{r}
+dim(macrophages.integrated.filtered)
+keep_cell <- macrophages.integrated.filtered$percent.mito <= 20
+summary(keep_cell)
+macrophages.integrated.filtered <- macrophages.integrated.filtered[, keep_cell]
+dim(macrophages.integrated.filtered)
+```
+
+# New subclsutering after filtering
+
+```{r}
+DefaultAssay(macrophages.integrated.filtered) <- "RNA"
+macrophages.2.list <- SplitObject(macrophages.integrated.filtered, split.by = "sample.id")
+macrophages.2.list
+```
+
+```{r}
+for (i in 1:length(macrophages.2.list)) {
+  macrophages.2.list[[i]] <- FindVariableFeatures(macrophages.2.list[[i]]
+                                                       , selection.method = "vst"
+                                                       , nfeatures = 2000
+                                                       , verbose = FALSE)
+}
+```
+
+```{r}
+k.filter <- min(200, min(sapply(macrophages.2.list, ncol)))
+k.filter
+```
+
+```{r}
+macrophages.2.anchors <- FindIntegrationAnchors(object.list = macrophages.2.list, dims = 1:30, k.filter = k.filter)
+```
+
+```{r}
+macrophages.2.integrated <- IntegrateData(anchorset = macrophages.2.anchors, dims = 1:30)
+```
+   
+```{r}
+DefaultAssay(macrophages.2.integrated) <- "integrated"
+macrophages.2.integrated <- ScaleData(macrophages.2.integrated, verbose = T)
+```
+
+```{r}
+dim(macrophages.2.integrated)
+```
+
+```{r}
+macrophages.2.integrated <- RunPCA(macrophages.2.integrated, npcs = 50, verbose = T)
+```
+
+```{r}
+system.time(macrophages.2.integrated <- JackStraw(macrophages.2.integrated, num.replicate = 100,
+dims = 50))
+macrophages.2.integrated <- ScoreJackStraw(macrophages.2.integrated, dims = 1:50)
+j <- JackStrawPlot(macrophages.2.integrated, dims = 1:50)
+pdf(paste0(outdir, "/35_JackStrawPlot_macrophages_2.pdf"))
+j
+dev.off()
+```
+
+```{r}
+macrophages.2.integrated <- FindNeighbors(macrophages.2.integrated, dims = 1:48)
+macrophages.2.integrated <- RunUMAP(macrophages.2.integrated, dims = 1:48)
+```
+
+```{r}
+for (i in seq(0,2,0.1)) {
+  macrophages.2.integrated <- FindClusters(macrophages.2.integrated, resolution = i, verbose = F)
+  macrophages.2.integrated[[paste0("macrophages_2_subclusters_res.", i)]] <- macrophages.2.integrated$seurat_clusters
+}
+```
+
+```{r}
+# install.packages("clustree")
+library(clustree)
+c <- clustree(macrophages.2.integrated, prefix = "macrophages_2_subclusters_res.")
+c
+pdf(paste0(outdir, "/36_clustree_macrophages_2.pdf"))
+c
+dev.off()
+```
+
+Using the stability index to assess clusters
+The stability index from the SC3 package (Kiselev et al. 2017) measures the stability of clusters across resolutions and is automatically calculated when a clustering tree is built.
+```{r}
+c <- clustree(macrophages.2.integrated, prefix = "macrophages_2_subclusters_res.", node_colour = "sc3_stability")
+pdf(paste0(outdir, "/37_clustree_macrophages_2_sc3_stability.pdf"))
+c
+dev.off()
+```
+
+SOCS3, IL-1R2, IL1rn
+=
+Socs3, Il1r2, Il1rn
+
+```{r}
+c <- clustree(macrophages.2.integrated, prefix = "macrophages_2_subclusters_res.",
+         node_colour = "Socs3", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/38_clustree_macrophages_2_Socs3.pdf"))
+c
+dev.off()
+```
+
+```{r}
+c <- clustree(macrophages.2.integrated, prefix = "macrophages_2_subclusters_res.",
+         node_colour = "Il1r2", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/39_clustree_macrophages_2_Il1r2.pdf"))
+c
+dev.off()
+```
+
+```{r}
+c <- clustree(macrophages.2.integrated, prefix = "macrophages_2_subclusters_res.",
+         node_colour = "Il1rn", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/40_clustree_macrophages_2_Il1rn.pdf"))
+c
+dev.off()
+```
+
+# RES 0.2
+
+```{r}
+# install.packages("Polychrome")
+library(Polychrome)
+set.seed(5658807) # for reproducibility
+levels <- levels(as.factor(macrophages.2.integrated$macrophages_2_subclusters_res.0.2))
+rainbow2.6c <- c("#03539C", "#12999E", "#B7CE05", "#FAEB09", "#FDA908", "#E82564")
+colors.macrophages.2.subclusters <- createPalette(length(levels), rainbow2.6c, M=1000)
+names(colors.macrophages.2.subclusters) <- levels
+colors.macrophages.2.subclusters
+slices <- rep(1,length(colors.macrophages.2.subclusters))
+pie(slices, col=colors.macrophages.2.subclusters, labels = names(colors.macrophages.2.subclusters))
+```
+
+```{r}
+Idents(macrophages.2.integrated) <- "macrophages_2_subclusters_res.0.2"
+DimPlot(macrophages.2.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 8, cols = colors.macrophages.2.subclusters)
+pdf(paste0(outdir, "/41_DimPlot_umap_macrophages_2_subclusters_res.0.2.pdf"))
+DimPlot(macrophages.2.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 6, cols = colors.macrophages.2.subclusters)
+dev.off()
+```
+
+```{r}   
+colors.samples <- c("#12999E", "#FDA908")
+names(colors.samples) <- c("C0", "C24")
+macrophages.2.integrated$sample.id <- factor(macrophages.2.integrated$sample.id, levels = names(colors.samples))
+p <- DimPlot(macrophages.2.integrated, reduction = "umap", group.by = "sample.id"
+             , cols = colors.samples
+             , label = F)
+pdf(paste0(outdir, "/42_UMAP_macrophages_2_samples.pdf")
+    , width = 10
+    , height = 9)
+p
+dev.off()
+pdf(paste0(outdir, "/43_UMAP_macrophages_2_samples_noLegend.pdf")
+    , width = 7
+    , height = 7)
+p + NoLegend()
+dev.off()
+```
+
+# Rename subclusters
+```{r}
+new.cluster.ids <- paste0("Macro", 1:length(levels(as.factor(macrophages.2.integrated$macrophages_2_subclusters_res.0.2))))
+names(new.cluster.ids) <- levels(macrophages.2.integrated)
+macrophages.2.integrated <- RenameIdents(macrophages.2.integrated, new.cluster.ids)
+macrophages.2.integrated[["renamed.macrophages.2.subclusters"]] <- macrophages.2.integrated@active.ident
+```
+
+```{r}
+Idents(macrophages.2.integrated) <- "renamed.macrophages.2.subclusters"
+names(colors.macrophages.2.subclusters) <- levels(macrophages.2.integrated$renamed.macrophages.2.subclusters)
+DimPlot(macrophages.2.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 8, cols = colors.macrophages.2.subclusters)
+pdf(paste0(outdir, "/44_DimPlot_umap_renamed_macrophages_2_subclusters.pdf"))
+DimPlot(macrophages.2.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 6, cols = colors.macrophages.2.subclusters)
+dev.off()
+```
+
+```{r}
+Idents(macrophages.2.integrated) <- "renamed.macrophages.2.subclusters"
+DimPlot(macrophages.2.integrated, reduction = "umap", pt.size = 1, label = F, label.size = 8, cols = colors.macrophages.2.subclusters) + NoLegend()
+pdf(paste0(outdir, "/45_DimPlot_umap_renamed_macrophages_2_subclusters_noLabels_noLegend.pdf"))
+DimPlot(macrophages.2.integrated, reduction = "umap", pt.size = 1, label = F, label.size = 6, cols = colors.macrophages.2.subclusters) + NoLegend()
+dev.off()
+```
+
+```{r}
+saveRDS(macrophages.2.integrated, paste0(outdir, "/46.macrophages.2.integrated.rds"))
+```
+
+# Conserved markers
+
+```{r}
+t <- table(macrophages.2.integrated$renamed.macrophages.2.subclusters, macrophages.2.integrated$sample.id)
+t
+openxlsx::write.xlsx(as.data.frame.matrix(t)
+                     , file = paste0(outdir, "/47_Sample_macrophages_2_subcluster_composition.xlsx")
+                     , rowNames = T
+                     , colNames = T)
+```
+
+```{r}
+DefaultAssay(macrophages.2.integrated) <- "RNA"
+Idents(macrophages.2.integrated) <- "renamed.macrophages.2.subclusters"
+subclusters <- levels(as.factor(macrophages.2.integrated$renamed.macrophages.2.subclusters))
+conserved.markers <- data.frame(matrix(ncol = 14))
+for (c in subclusters) {
+  print(c)
+  markers.c <- FindConservedMarkers(macrophages.2.integrated, ident.1 = c, grouping.var = "sample.id", verbose = T
+                                    , logfc.threshold = -Inf
+                                    , min.pct = -Inf
+                                    , min.cells.feature = -Inf
+                                    , min.cells.group = -Inf)
+  markers.c <- cbind(data.frame(cluster = rep(c, dim(markers.c)[1])
+                                , gene = rownames(markers.c)), markers.c)
+  write.table(markers.c, file = paste0(outdir, "/48_markers_", c, "_macrophages_2_subclusters.txt"))
+  colnames(conserved.markers) <- colnames(markers.c)
+  conserved.markers <- rbind(conserved.markers, markers.c)
+}
+```
+
+```{r, eval=FALSE}
+# for (c in 1:4) {
+#   subcluster <- paste0("AM", c)
+#   markers.c <- read.table(file = paste0(outdir, "/31_markers_", subcluster, "_AM_subclusters.txt"))
+#   colnames(conserved.markers) <- colnames(markers.c)
+#   conserved.markers <- rbind(conserved.markers, markers.c)
+# }
+# head(conserved.markers)
+```
+
+```{r, eval=FALSE}
+# markers.AM5 <- read.table(file = paste0(outdir, "/31_markers_", "AM5", "_AM_subclusters.txt"))
+# colnames(markers.AM5)
+# colnames(conserved.markers)
+```
+
+```{r, eval=FALSE}
+# for ( i in 1:10 ) {
+#   markers.AM5[, 34+i] <- rep(NA, dim(markers.AM5)[1])
+# }
+# markers.AM5 <- markers.AM5[, c(1:12, 35:44, 13:34)]
+# colnames(markers.AM5) <- colnames(conserved.markers)
+# head(markers.AM5)
+```
+
+```{r, eval=FALSE}
+# conserved.markers <- rbind(conserved.markers, markers.AM5)
+```
+
+```{r}
+conserved.markers <- conserved.markers[-1, ]
+conserved.markers <- conserved.markers[, c(1:2, 13:14, 3:12)]
+head(conserved.markers)
+```
+
+Only top markers that are positive markers
+```{r}
+conserved.markers$marker.type <- apply(conserved.markers, 1, function(x) {
+  y <- as.numeric(x)
+  if ( (if (is.na(y[6])) {TRUE} else {y[6]>0})
+       & (if (is.na(y[11])) {TRUE} else {y[11]>0})
+       # & (if (is.na(y[16])) {TRUE} else {y[16]>0})
+       # & (if (is.na(y[21])) {TRUE} else {y[21]>0})
+       # & (if (is.na(y[26])) {TRUE} else {y[26]>0})
+       # & (if (is.na(y[31])) {TRUE} else {y[31]>0})
+       # & (if (is.na(y[36])) {TRUE} else {y[36]>0})
+       # & (if (is.na(y[41])) {TRUE} else {y[41]>0})
+       )
+    {"POS"}
+  else if ( ( if (is.na(y[6])) {TRUE} else {y[6]<0})
+       & (if (is.na(y[11])) {TRUE} else {y[11]<0})
+       # & (if (is.na(y[16])) {TRUE} else {y[16]<0})
+       # & (if (is.na(y[21])) {TRUE} else {y[21]<0})
+       # & (if (is.na(y[26])) {TRUE} else {y[26]<0})
+       # & (if (is.na(y[31])) {TRUE} else {y[31]<0})
+       # & (if (is.na(y[36])) {TRUE} else {y[36]<0})
+       # & (if (is.na(y[41])) {TRUE} else {y[41]<0})
+       ) 
+    {"NEG"}
+  else {"UND"}
+  })
+conserved.markers <- conserved.markers[, c(1:4, 15, 5:14)]
+```
+
+```{r}
+openxlsx::write.xlsx(conserved.markers, paste0(outdir, "/49_conserved_markers_macrophages_2.xlsx")
+                     , colNames = T)
+head(conserved.markers)
+```
+
+```{r}
+saveRDS(macrophages.2.integrated, paste0(outdir, "/50.macrophages.2.integrated.rds"))
+```
+
+```{r}
+conserved.markers.pos <- conserved.markers[conserved.markers$marker.type == "POS", ]
+head(conserved.markers.pos)
+```
+
+```{r}
+table(macrophages.2.integrated$sample.id)
+colnames(conserved.markers.pos)
+```
+
+```{r}
+library(dplyr)
+top1.pos <- conserved.markers.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -minimump_p_val)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -max_pval)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = C24_avg_log2FC)
+head(top1.pos)
+```
+
+```{r}
+DefaultAssay(macrophages.2.integrated) <- "RNA"
+f <- FeaturePlot(macrophages.2.integrated, features = top1.pos$gene, min.cutoff = "q9", order = T, label = T
+                 , label.size = 8, repel = T)
+f
+pdf(paste0(outdir, "/51_FeaturePlot_top_pos_markers_macrophages_2.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+# DotPlot of top markers
+
+```{r}
+DefaultAssay(macrophages.2.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.2.integrated
+        , features = top1.pos$gene
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 8
+        , group.by = "renamed.macrophages.2.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/52_DotPlot_top_cell_types_pos_markers_clusters.macrophages_2.pdf")
+    , width = 7
+    , height = 7)
+d
+dev.off()
+```
+
+# DotPlot of top 10 markers
+
+```{r}
+library(dplyr)
+top10.pos <- conserved.markers.pos %>% group_by(cluster) %>% top_n(n = 10, wt = -minimump_p_val)
+top10.pos <- top10.pos %>% group_by(cluster) %>% top_n(n = 10, wt = -max_pval)
+top10.pos <- top10.pos %>% group_by(cluster) %>% top_n(n = 10, wt = C24_avg_log2FC)
+head(top10.pos)
+```
+
+```{r}
+DefaultAssay(macrophages.2.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.2.integrated
+        , features = top10.pos$gene
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 8
+        , group.by = "renamed.macrophages.2.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/53_DotPlot_top10_cell_types_pos_markers_clusters.macrophages.2.pdf")
+    , width = 14
+    , height = 7)
+d
+dev.off()
+```
+
+## Segregation of clusters by various sources of uninteresting variation
+Explore additional metrics, such as the number of UMIs and genes per cell, and mitochondrial gene expression by UMAP.
+```{r}
+# Determine metrics to plot present in tcells.integrated@meta.data
+metrics <-  c("nCount_RNA", "nFeature_RNA", "percent.mito")
+
+f <- FeaturePlot(macrophages.2.integrated, 
+            reduction = "umap", 
+            features = metrics,
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+f
+pdf(paste0(outdir, "/54_FeaturePlot_macrophages.2.integrated_umap_metrics.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+# Remove cells with mito expn > 10%
+
+```{r}
+dim(macrophages.integrated.filtered)
+keep_cell <- macrophages.integrated.filtered$percent.mito <= 10
+summary(keep_cell)
+macrophages.integrated.filtered <- macrophages.integrated.filtered[, keep_cell]
+dim(macrophages.integrated.filtered)
+```
+
+# New subclustering after filtering
+
+```{r}
+DefaultAssay(macrophages.integrated.filtered) <- "RNA"
+macrophages.3.list <- SplitObject(macrophages.integrated.filtered, split.by = "sample.id")
+macrophages.3.list
+```
+
+```{r}
+for (i in 1:length(macrophages.3.list)) {
+  macrophages.3.list[[i]] <- FindVariableFeatures(macrophages.3.list[[i]]
+                                                       , selection.method = "vst"
+                                                       , nfeatures = 2000
+                                                       , verbose = FALSE)
+}
+```
+
+```{r}
+k.filter <- min(200, min(sapply(macrophages.3.list, ncol)))
+k.filter
+```
+
+```{r}
+macrophages.3.anchors <- FindIntegrationAnchors(object.list = macrophages.3.list, dims = 1:30, k.filter = k.filter)
+```
+
+```{r}
+macrophages.3.integrated <- IntegrateData(anchorset = macrophages.3.anchors, dims = 1:30)
+```
+   
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "integrated"
+macrophages.3.integrated <- ScaleData(macrophages.3.integrated, verbose = T)
+```
+
+```{r}
+dim(macrophages.3.integrated)
+```
+
+```{r}
+macrophages.3.integrated <- RunPCA(macrophages.3.integrated, npcs = 50, verbose = T)
+```
+
+```{r}
+system.time(macrophages.3.integrated <- JackStraw(macrophages.3.integrated, num.replicate = 100,
+dims = 50))
+macrophages.3.integrated <- ScoreJackStraw(macrophages.3.integrated, dims = 1:50)
+j <- JackStrawPlot(macrophages.3.integrated, dims = 1:50)
+pdf(paste0(outdir, "/55_JackStrawPlot_macrophages_3.pdf"))
+j
+dev.off()
+```
+
+```{r}
+macrophages.3.integrated <- FindNeighbors(macrophages.3.integrated, dims = 1:42)
+macrophages.3.integrated <- RunUMAP(macrophages.3.integrated, dims = 1:42)
+```
+
+```{r}
+for (i in seq(0,2,0.1)) {
+  macrophages.3.integrated <- FindClusters(macrophages.3.integrated, resolution = i, verbose = F)
+  macrophages.3.integrated[[paste0("macrophages_3_subclusters_res.", i)]] <- macrophages.3.integrated$seurat_clusters
+}
+```
+
+```{r}
+# install.packages("clustree")
+library(clustree)
+c <- clustree(macrophages.3.integrated, prefix = "macrophages_3_subclusters_res.")
+c
+pdf(paste0(outdir, "/56_clustree_macrophages_3.pdf"))
+c
+dev.off()
+```
+
+Using the stability index to assess clusters
+The stability index from the SC3 package (Kiselev et al. 2017) measures the stability of clusters across resolutions and is automatically calculated when a clustering tree is built.
+```{r}
+c <- clustree(macrophages.3.integrated, prefix = "macrophages_3_subclusters_res.", node_colour = "sc3_stability")
+pdf(paste0(outdir, "/57_clustree_macrophages_3_sc3_stability.pdf"))
+c
+dev.off()
+```
+
+SOCS3, IL-1R2, IL1rn
+=
+Socs3, Il1r2, Il1rn
+
+```{r}
+c <- clustree(macrophages.3.integrated, prefix = "macrophages_3_subclusters_res.",
+         node_colour = "Socs3", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/58_clustree_macrophages_3_Socs3.pdf"))
+c
+dev.off()
+```
+
+```{r}
+c <- clustree(macrophages.3.integrated, prefix = "macrophages_3_subclusters_res.",
+         node_colour = "Il1r2", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/59_clustree_macrophages_3_Il1r2.pdf"))
+c
+dev.off()
+```
+
+```{r}
+c <- clustree(macrophages.3.integrated, prefix = "macrophages_3_subclusters_res.",
+         node_colour = "Il1rn", node_colour_aggr = "mean")
+c
+pdf(paste0(outdir, "/60_clustree_macrophages_3_Il1rn.pdf"))
+c
+dev.off()
+```
+
+# RES 0.3
+
+```{r}
+# install.packages("Polychrome")
+library(Polychrome)
+set.seed(5658807) # for reproducibility
+levels <- levels(as.factor(macrophages.3.integrated$macrophages_3_subclusters_res.0.3))
+rainbow2.6c <- c("#03539C", "#12999E", "#B7CE05", "#FAEB09", "#FDA908", "#E82564")
+colors.macrophages.3.subclusters <- createPalette(length(levels), rainbow2.6c, M=1000)
+names(colors.macrophages.3.subclusters) <- levels
+colors.macrophages.3.subclusters
+slices <- rep(1,length(colors.macrophages.3.subclusters))
+pie(slices, col=colors.macrophages.3.subclusters, labels = names(colors.macrophages.3.subclusters))
+```
+
+```{r}
+Idents(macrophages.3.integrated) <- "macrophages_3_subclusters_res.0.3"
+DimPlot(macrophages.3.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 8, cols = colors.macrophages.3.subclusters)
+pdf(paste0(outdir, "/61_DimPlot_umap_macrophages_3_subclusters_res.0.3.pdf"))
+DimPlot(macrophages.3.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 6, cols = colors.macrophages.3.subclusters)
+dev.off()
+```
+
+```{r}   
+colors.samples <- c("#12999E", "#FDA908")
+names(colors.samples) <- c("C0", "C24")
+macrophages.3.integrated$sample.id <- factor(macrophages.3.integrated$sample.id, levels = names(colors.samples))
+p <- DimPlot(macrophages.3.integrated, reduction = "umap", group.by = "sample.id"
+             , cols = colors.samples
+             , label = F)
+pdf(paste0(outdir, "/62_UMAP_macrophages_3_samples.pdf")
+    , width = 10
+    , height = 9)
+p
+dev.off()
+pdf(paste0(outdir, "/63_UMAP_macrophages_3_samples_noLegend.pdf")
+    , width = 7
+    , height = 7)
+p + NoLegend()
+dev.off()
+```
+
+# Rename subclusters
+```{r}
+new.cluster.ids <- paste0("Macro", 1:length(levels(as.factor(macrophages.3.integrated$macrophages_3_subclusters_res.0.3))))
+names(new.cluster.ids) <- levels(macrophages.3.integrated)
+macrophages.3.integrated <- RenameIdents(macrophages.3.integrated, new.cluster.ids)
+macrophages.3.integrated[["renamed.macrophages.3.subclusters"]] <- macrophages.3.integrated@active.ident
+```
+
+```{r}
+Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters"
+names(colors.macrophages.3.subclusters) <- levels(macrophages.3.integrated$renamed.macrophages.3.subclusters)
+DimPlot(macrophages.3.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 8, cols = colors.macrophages.3.subclusters)
+pdf(paste0(outdir, "/64_DimPlot_umap_renamed_macrophages_3_subclusters.pdf"))
+DimPlot(macrophages.3.integrated, reduction = "umap", pt.size = 1, label = T, label.size = 6, cols = colors.macrophages.3.subclusters)
+dev.off()
+```
+
+```{r}
+Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters"
+DimPlot(macrophages.3.integrated, reduction = "umap", pt.size = 1, label = F, label.size = 8, cols = colors.macrophages.3.subclusters) + NoLegend()
+pdf(paste0(outdir, "/65_DimPlot_umap_renamed_macrophages_3_subclusters_noLabels_noLegend.pdf"))
+DimPlot(macrophages.3.integrated, reduction = "umap", pt.size = 1, label = F, label.size = 6, cols = colors.macrophages.3.subclusters) + NoLegend()
+dev.off()
+```
+
+```{r}
+saveRDS(macrophages.3.integrated, paste0(outdir, "/66.macrophages.3.integrated.rds"))
+```
+
+# Conserved markers
+
+```{r}
+t <- table(macrophages.3.integrated$renamed.macrophages.3.subclusters, macrophages.3.integrated$sample.id)
+t
+openxlsx::write.xlsx(as.data.frame.matrix(t)
+                     , file = paste0(outdir, "/67_Sample_macrophages_3_subcluster_composition.xlsx")
+                     , rowNames = T
+                     , colNames = T)
+```
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters"
+subclusters <- levels(as.factor(macrophages.3.integrated$renamed.macrophages.3.subclusters))
+conserved.markers <- data.frame(matrix(ncol = 14))
+for (c in subclusters) {
+  print(c)
+  markers.c <- FindConservedMarkers(macrophages.3.integrated, ident.1 = c, grouping.var = "sample.id", verbose = T
+                                    , logfc.threshold = -Inf
+                                    , min.pct = -Inf
+                                    , min.cells.feature = -Inf
+                                    , min.cells.group = -Inf)
+  markers.c <- cbind(data.frame(cluster = rep(c, dim(markers.c)[1])
+                                , gene = rownames(markers.c)), markers.c)
+  write.table(markers.c, file = paste0(outdir, "/68_markers_", c, "_macrophages_3_subclusters.txt"))
+  colnames(conserved.markers) <- colnames(markers.c)
+  conserved.markers <- rbind(conserved.markers, markers.c)
+}
+```
+
+```{r, eval=FALSE}
+# for (c in 1:4) {
+#   subcluster <- paste0("AM", c)
+#   markers.c <- read.table(file = paste0(outdir, "/31_markers_", subcluster, "_AM_subclusters.txt"))
+#   colnames(conserved.markers) <- colnames(markers.c)
+#   conserved.markers <- rbind(conserved.markers, markers.c)
+# }
+# head(conserved.markers)
+```
+
+```{r, eval=FALSE}
+# markers.AM5 <- read.table(file = paste0(outdir, "/31_markers_", "AM5", "_AM_subclusters.txt"))
+# colnames(markers.AM5)
+# colnames(conserved.markers)
+```
+
+```{r, eval=FALSE}
+# for ( i in 1:10 ) {
+#   markers.AM5[, 34+i] <- rep(NA, dim(markers.AM5)[1])
+# }
+# markers.AM5 <- markers.AM5[, c(1:12, 35:44, 13:34)]
+# colnames(markers.AM5) <- colnames(conserved.markers)
+# head(markers.AM5)
+```
+
+```{r, eval=FALSE}
+# conserved.markers <- rbind(conserved.markers, markers.AM5)
+```
+
+```{r}
+conserved.markers <- conserved.markers[-1, ]
+conserved.markers <- conserved.markers[, c(1:2, 13:14, 3:12)]
+head(conserved.markers)
+```
+
+Only top markers that are positive markers
+```{r}
+conserved.markers$marker.type <- apply(conserved.markers, 1, function(x) {
+  y <- as.numeric(x)
+  if ( (if (is.na(y[6])) {TRUE} else {y[6]>0})
+       & (if (is.na(y[11])) {TRUE} else {y[11]>0})
+       # & (if (is.na(y[16])) {TRUE} else {y[16]>0})
+       # & (if (is.na(y[21])) {TRUE} else {y[21]>0})
+       # & (if (is.na(y[26])) {TRUE} else {y[26]>0})
+       # & (if (is.na(y[31])) {TRUE} else {y[31]>0})
+       # & (if (is.na(y[36])) {TRUE} else {y[36]>0})
+       # & (if (is.na(y[41])) {TRUE} else {y[41]>0})
+       )
+    {"POS"}
+  else if ( ( if (is.na(y[6])) {TRUE} else {y[6]<0})
+       & (if (is.na(y[11])) {TRUE} else {y[11]<0})
+       # & (if (is.na(y[16])) {TRUE} else {y[16]<0})
+       # & (if (is.na(y[21])) {TRUE} else {y[21]<0})
+       # & (if (is.na(y[26])) {TRUE} else {y[26]<0})
+       # & (if (is.na(y[31])) {TRUE} else {y[31]<0})
+       # & (if (is.na(y[36])) {TRUE} else {y[36]<0})
+       # & (if (is.na(y[41])) {TRUE} else {y[41]<0})
+       ) 
+    {"NEG"}
+  else {"UND"}
+  })
+conserved.markers <- conserved.markers[, c(1:4, 15, 5:14)]
+```
+
+```{r}
+openxlsx::write.xlsx(conserved.markers, paste0(outdir, "/69_conserved_markers_macrophages_3.xlsx")
+                     , colNames = T)
+head(conserved.markers)
+```
+
+```{r}
+saveRDS(macrophages.3.integrated, paste0(outdir, "/70.macrophages.3.integrated.rds"))
+```
+
+```{r}
+conserved.markers.pos <- conserved.markers[conserved.markers$marker.type == "POS", ]
+head(conserved.markers.pos)
+```
+
+```{r}
+table(macrophages.3.integrated$sample.id)
+colnames(conserved.markers.pos)
+```
+
+```{r}
+library(dplyr)
+top1.pos <- conserved.markers.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -minimump_p_val)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -max_pval)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = C24_avg_log2FC)
+head(top1.pos)
+```
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+f <- FeaturePlot(macrophages.3.integrated, features = top1.pos$gene, min.cutoff = "q9", order = T, label = T
+                 , label.size = 8, repel = T)
+f
+pdf(paste0(outdir, "/71_FeaturePlot_top_pos_markers_macrophages_3.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+# DotPlot of top markers
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.3.integrated
+        , features = top1.pos$gene
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 8
+        , group.by = "renamed.macrophages.3.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/72_DotPlot_top_cell_types_pos_markers_clusters.macrophages_3.pdf")
+    , width = 7
+    , height = 7)
+d
+dev.off()
+```
+
+# DotPlot of top 10 markers
+
+```{r}
+library(dplyr)
+top10.pos <- conserved.markers.pos %>% group_by(cluster) %>% top_n(n = 10, wt = -minimump_p_val)
+top10.pos <- top10.pos %>% group_by(cluster) %>% top_n(n = 10, wt = -max_pval)
+top10.pos <- top10.pos %>% group_by(cluster) %>% top_n(n = 10, wt = C24_avg_log2FC)
+head(top10.pos)
+```
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.3.integrated
+        , features = top10.pos$gene
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 8
+        , group.by = "renamed.macrophages.3.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/73_DotPlot_top10_cell_types_pos_markers_clusters.macrophages.3.pdf")
+    , width = 14
+    , height = 7)
+d
+dev.off()
+```
+
+## Segregation of clusters by various sources of uninteresting variation
+Explore additional metrics, such as the number of UMIs and genes per cell, and mitochondrial gene expression by UMAP.
+```{r}
+# Determine metrics to plot present in tcells.integrated@meta.data
+metrics <-  c("nCount_RNA", "nFeature_RNA", "percent.mito")
+
+f <- FeaturePlot(macrophages.3.integrated, 
+            reduction = "umap", 
+            features = metrics,
+            pt.size = 0.4, 
+            order = TRUE,
+            min.cutoff = 'q10',
+            label = TRUE)
+f
+pdf(paste0(outdir, "/74_FeaturePlot_macrophages.3.integrated_umap_metrics.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+# Heatmap
+
+```{r}
+macrophages.3.integrated <- ScaleData(macrophages.3.integrated, verbose = T
+                                , features = rownames(macrophages.3.integrated))
+d <- DoHeatmap(macrophages.3.integrated, features = top10.pos$gene
+               , group.by = "renamed.macrophages.3.subclusters"
+               , group.colors = colors.macrophages.3.subclusters) + NoLegend()
+d
+pdf(paste0(outdir, "/75_DoHeatmap_top10_pos_macrophages_3.pdf")
+    , width = 15
+    , height = 13)
+d
+dev.off()
+```
+
+# DotPlot with known/useful markers
+
+```{r}
+immune.cells <- c("Ptprc", "Spi1", "Cd3g")
+b.cells <- c("Cd19", "Cd79a", "Cd79b")
+t.cells <- "Cd3e"
+nk.cells <- c("Ncr1")
+myeloid.cells <- "Cd68"
+neutrophils <- c("Csf3r", "S100a8", "S100a9", "Retnlg")
+monocytes.macrophages.dendritic.cells <- "Csf1r"
+dc <- c("Siglech", "Cd209a")
+dc1 <- "Xcr1"
+dc2 <- c("Ccl18", "Nr4a3", "Tnfsf12")
+dc3 <- "Fscn1"
+pdc <- "Tcf4"
+monocytes <- c("Ly6c1", "Ly6c2", "Ccr2", "Cx3cr1", "Fcgr4")
+macrophages <- c("Mrc1", "Lyz2", "Adgre1", "Axl", "Cxcl2", "Trem2", "C1qc", "Fcgr1", "C5ar1")
+am.markers <- c("Pparg", "Itgax", "Ear1", "Ear2", "Ear3", "Car4", "Siglec5", "SiglecF")
+im.markers <- c("Itgam", "Cx3cr1", "Ccl12", "Bhlme40", "Trem2", "Cxcl12", "Csf1")
+peribronchial.macrophages <- c("Ccr2", "Bhlhe40", "Bhlhe41")
+perivascular.macrophages <- c("Lyve1", "F13a1")
+proliferating.cells <- "Mki67"
+mesenchymal.cells <- c("Col1a1", "Col1a2", "Pdgfra")
+epithelial.cells <- c("Epcam", "Cdh1")
+mast.cells <- "Mcpt8"
+endothelial.cells <- c("Pecam1", "Emcn")
+```
+
+```{r}
+markers <- unique(c(immune.cells, b.cells, t.cells, nk.cells, myeloid.cells, neutrophils, monocytes.macrophages.dendritic.cells, dc, dc1, dc2, dc3, pdc, monocytes, macrophages, am.markers, im.markers, peribronchial.macrophages, perivascular.macrophages, proliferating.cells, mesenchymal.cells, epithelial.cells, mast.cells, endothelial.cells))
+```
+
+# Dot plot
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.3.integrated
+        , features = markers
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 15
+        , group.by = "renamed.macrophages.3.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/76_DotPlot_known_markers_macrophages_3.pdf")
+    , width = 18
+    , height = 4)
+d
+dev.off()
+```
+
+# Expression of genes of interest: Socs3, Il1r2, Il1rn
+```{r}
+goi <- c("Socs3", "Il1r2", "Il1rn")
+```
+
+```{r, eval=FALSE}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+f <- FeaturePlot(macrophages.3.integrated, features = goi, min.cutoff = "q9", order = T, label = T
+                 , label.size = 8, repel = T)
+f
+pdf(paste0(outdir, "/77_FeaturePlot_goi_macrophages_3.pdf")
+    , width = 14
+    , height = 14)
+f
+dev.off()
+```
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+d <- DotPlot(object = macrophages.3.integrated
+        , features = goi
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 15
+        , group.by = "renamed.macrophages.3.subclusters") + RotatedAxis()
+d
+pdf(paste0(outdir, "/78_DotPlot_goi_macrophages.pdf")
+    , width = 6
+    , height = 4)
+d
+dev.off()
+```
+
+# DIFFERENTIAL EXPRESSION ANALYSES
+
+differential expression studies for the following groups:
+1. C24 vs C0 within each cell type (from manual annotation annotation.1)
+
+# 1. C24 vs C0 within each cell type (from manual annotation annotation.1)
+
+```{r}
+macrophages.3.integrated$renamed.macrophages.3.subclusters.sample.id <- paste(macrophages.3.integrated$renamed.macrophages.3.subclusters, macrophages.3.integrated$sample.id, sep="_")
+levels(factor(macrophages.3.integrated$renamed.macrophages.3.subclusters.sample.id))
+```
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+output <- paste0(outdir, "/79_DE_macrophages_3_subclusters_C24_vs_C0_")
+levels(factor(macrophages.3.integrated$renamed.macrophages.3.subclusters.sample.id))
+```
+
+```{r}
+for (cell.type in levels(factor(macrophages.3.integrated$renamed.macrophages.3.subclusters))) {
+  try({
+    print(cell.type)
+    ident1 <- paste0(cell.type, "_C24")
+    ident2 <- paste0(cell.type, "_C0")
+    Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters.sample.id"
+    condition.diffgenes <- FindMarkers(
+      macrophages.3.integrated,
+      ident.1 = ident1,
+      ident.2 = ident2,
+      logfc.threshold = -Inf,
+      test.use = 'wilcox',
+      min.pct = -Inf,
+      verbose = T,
+      min.cells.feature = -Inf,
+      min.cells.group = -Inf
+    )
+    
+    condition.diffgenes.adjpval.0.05 <-
+      condition.diffgenes[condition.diffgenes$p_val_adj < 0.05, ]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <-
+      condition.diffgenes.adjpval.0.05[condition.diffgenes.adjpval.0.05$avg_log2FC > 0, ]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <-
+      condition.diffgenes.adjpval.0.05.upregulated.sorted[order(condition.diffgenes.adjpval.0.05.upregulated.sorted$avg_log2FC,
+                                                                decreasing = T), ]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <-
+      condition.diffgenes.adjpval.0.05[condition.diffgenes.adjpval.0.05$avg_log2FC < 0, ]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <-
+      condition.diffgenes.adjpval.0.05.downregulated.sorted[order(
+        condition.diffgenes.adjpval.0.05.downregulated.sorted$avg_log2FC,
+        decreasing = F
+      ), ]
+    list_of_datasets <-
+      list(
+        "sig.upregulated.genes.ordered.by.avg.logFC" = condition.diffgenes.adjpval.0.05.upregulated.sorted,
+        "sig.downregulated.genes.ordered.by.avg.logFC" = condition.diffgenes.adjpval.0.05.downregulated.sorted,
+        "all.genes.ordered.by.adj.pval" = condition.diffgenes
+      )
+    openxlsx::write.xlsx(list_of_datasets,
+               file = paste0(output,
+                             cell.type,
+                             ".xlsx"),
+               row.names = T)
+  })
+}
+```
+
+```{r}
+for (cell.type in levels(factor(macrophages.3.integrated$renamed.macrophages.3.subclusters))) {
+  try({
+    print(cell.type)
+    filename <-paste0(output,
+                      cell.type,
+                      ".xlsx")
+    sheets <- openxlsx::getSheetNames(filename)
+    SheetList <- lapply(sheets,openxlsx::read.xlsx,xlsxFile=filename)
+    names(SheetList) <- sheets
+    
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <- SheetList[[1]]
+    rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted) <- condition.diffgenes.adjpval.0.05.upregulated.sorted[,1]
+    condition.diffgenes.adjpval.0.05.upregulated.sorted <- condition.diffgenes.adjpval.0.05.upregulated.sorted[, -1]
+    
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <- SheetList[[2]]
+    rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted) <- condition.diffgenes.adjpval.0.05.downregulated.sorted[,1]
+    condition.diffgenes.adjpval.0.05.downregulated.sorted <- condition.diffgenes.adjpval.0.05.downregulated.sorted[, -1]
+    
+    
+    Idents(annotated) <- "renamed.macrophages.3.subclusters"
+    
+    try({f <-
+      FeaturePlot(
+        macrophages.3.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1],
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90"
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_FeaturePlot_top_upregulated_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({f <-
+      FeaturePlot(
+        macrophages.3.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1],
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90"
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_FeaturePlot_top_downregulated_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.3.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1],
+        group.by = "renamed.macrophages.3.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_VlnPlot_top_upregulated_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.3.integrated,
+        features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1],
+        group.by = "renamed.macrophages.3.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_VlnPlot_top_downregulated_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+    
+    ## DotPlot with 50 most upregulated genes
+    Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters.sample.id"
+    try({d <- DotPlot(
+      macrophages.3.integrated,
+      features = rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted)[1:50],
+      cols = c("#03539C", "#E82564"),
+      dot.scale = 8,
+      group.by = "renamed.macrophages.3.subclusters.sample.id"
+    ) + RotatedAxis()
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_DotPlot_top50_upregulated_groupby_annotation.1.sample.id.pdf"
+      ),
+      width = ( 4 + min(50, length(rownames(condition.diffgenes.adjpval.0.05.upregulated.sorted))) * 15 / 50 ),
+      height = 17
+    )
+    print(d)
+    dev.off()
+    })
+    
+    ## DotPlot with 50 most downregulated genes
+    Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters.sample.id"
+    try({d <- DotPlot(
+      macrophages.3.integrated,
+      features = rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted)[1:50],
+      cols = c("#03539C", "#E82564"),
+      dot.scale = 8,
+      group.by = "renamed.macrophages.3.subclusters.sample.id"
+    ) + RotatedAxis()
+    pdf(
+      paste0(
+        output,
+        cell.type,
+        "_DotPlot_top50_downregulated_groupby_annotation.1.sample.id.pdf"
+      ),
+      width = ( 4 + min(50, length(rownames(condition.diffgenes.adjpval.0.05.downregulated.sorted))) * 15 / 50 ),
+      height = 17
+    )
+    print(d)
+    dev.off()
+    })
+  })
+}
+```
+
+# Plots for genes of interest
+
+```{r}
+for (gene in goi) {
+  try({
+    Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters"
+    try({f <-
+      FeaturePlot(
+        macrophages.3.integrated,
+        features = gene,
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90",
+        label = T
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/80_",
+        gene,
+        "_FeaturePlot_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.3.integrated,
+        features = gene,
+        group.by = "renamed.macrophages.3.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/81_",
+        gene,
+        "_VlnPlot_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+  })    
+}
+
+
+Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters.sample.id"
+try({d <- DotPlot(
+  macrophages.3.integrated,
+  features = goi,
+  cols = c("#03539C", "#E82564"),
+  dot.scale = 8,
+  group.by = "renamed.macrophages.3.subclusters.sample.id"
+) + RotatedAxis()
+pdf(
+  paste0(
+    outdir,
+    "/82_",
+    paste(goi, sep = "_") ,
+    "_DotPlot_groupby_annotation.1.sample.id.pdf"
+  ),
+  width = ( 4 + length(goi) * 15 / 50 ),
+  height = 17
+)
+print(d)
+dev.off()
+})
+```
+
+# Plots for more genes of interest: F480 (antibody), CD11b, CD11c, CD64, MHCII
+In mouse: 
+F4/80 (antibody) > Emr1, Adgre1
+CD11b -> Itgam
+CD11c -> Itgax
+CD64 -> Fcgr1
+MHCII -> H2-Ab
+
+```{r}
+goi <- c("Adgre1", "Itgam", "Itgax", "Fcgr1", "H2-Ab1")
+```
+
+```{r}
+DefaultAssay(macrophages.3.integrated) <- "RNA"
+for (gene in goi) {
+  c <- clustree(macrophages.3.integrated, prefix = "macrophages_3_subclusters_res.",
+                node_colour = gene, node_colour_aggr = "mean")
+  pdf(paste0(outdir, "/83_clustree_", gene, "_macrophages.pdf"))
+  print(c)
+  dev.off()
+}
+```
+
+```{r}
+for (gene in goi) {
+  try({
+    Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters"
+    try({f <-
+      FeaturePlot(
+        macrophages.3.integrated,
+        features = gene,
+        split.by = "sample.id",
+        cols = c("grey", "#E82564"),
+        order = T,
+        min.cutoff = "q10",
+        max.cutoff = "q90",
+        label = T
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/84_",
+        gene,
+        "_FeaturePlot_split_by_sample.pdf"
+      ),
+      width = 14,
+      height = 7
+    )
+    print(f)
+    dev.off()
+    })
+    
+    try({plot <-
+      VlnPlot(
+        macrophages.3.integrated,
+        features = gene,
+        group.by = "renamed.macrophages.3.subclusters",
+        split.by = "sample.id",
+        pt.size = 0,
+        combine = FALSE,
+        cols = colors.samples
+      )
+    pdf(
+      paste0(
+        outdir,
+        "/85_",
+        gene,
+        "_VlnPlot_group_by_cluster_split_by_sample.pdf"
+      ),
+      width = 11,
+      height = 8.5
+    )
+    print(plot)
+    dev.off()
+    })
+  })    
+}
+
+
+Idents(macrophages.3.integrated) <- "renamed.macrophages.3.subclusters.sample.id"
+try({d <- DotPlot(
+  macrophages.3.integrated,
+  features = goi,
+  cols = c("#03539C", "#E82564"),
+  dot.scale = 8,
+  group.by = "renamed.macrophages.3.subclusters.sample.id"
+) + RotatedAxis()
+pdf(
+  paste0(
+    outdir,
+    "/86_",
+    paste(goi, sep = "_") ,
+    "_DotPlot_groupby_macrophages_subclusters.sample.id.pdf"
+  ),
+  width = ( 4 + length(goi) * 15 / 50 ),
+  height = 17
+)
+print(d)
+dev.off()
+})
+```
+
+## Session Information
+```{r}
+sessionInfo()
+```
+
+```{r}
+writeLines(capture.output(sessionInfo()), "./scripts/9_Subcluster_Macrophages/9_Subcluster_Macrophages.sessionInfo.txt")
+```

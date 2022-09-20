@@ -1,0 +1,1010 @@
+---
+title: "Privratsky-20210215 - Automated annotations"
+author: "Hélène Fradin Kirshner"
+date: "03/22/2021"
+output: html_document
+---
+
+rmarkdown::render('./6_Automated_annotations/6_Automated_annotations.Rmd')
+
+Changes in myeloid and kidney cells after CLP - Analysis of 2 x 10X scRNA-seq samples from 2 pools of WT mice (3 Sham + 3 CLP): comparison of gene expression in different cell populations
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(fig.width=12, fig.height=8,
+                      echo=TRUE, warning=FALSE, message=FALSE, error=FALSE
+                      , tidy.opts=list(width.cutoff=60),tidy=TRUE
+                      , cache=TRUE
+                      # , cache.lazy = FALSE
+                      )
+knitr::opts_knit$set(root.dir = '/data/omicscore/Privratsky-Privratsky-20210215')
+# knitr::opts_knit$set(root.dir = '~/Volumes/HARDAC-OmicsCore/Privratsky-Privratsky-20210215')
+```
+
+```{r}
+rainbow1.7c <- c("#B3ADD3", "#80617D", "#A75769", "#F9C971", "#A3C587", "#40A8AC", "#296D71")
+slices <- rep(1, length(rainbow1.7c))
+pie(slices, col=rainbow1.7c)
+```
+
+```{r}
+rainbow2.6c <- c("#03539C", "#12999E", "#B7CE05", "#FAEB09", "#FDA908", "#E82564")
+slices <- rep(1, length(rainbow2.6c))
+pie(slices, col=rainbow2.6c)
+```
+
+```{r}
+rainbow3.5c <- c("#f66e6e", "#f6b36e", "#f5f66e", "#6ef3f6", "#9c6ef6")
+slices <- rep(1, length(rainbow3.5c))
+pie(slices, col=rainbow3.5c)
+```
+
+```{r}
+rainbow4.12c <- c("#1a1334", "#27294a", "#01545a", "#017352", "#02c383", "#abd962", "#fbbf46", "#ef6b32", "#ee0445", "#a22b5e", "#710062", "#022c7d")
+slices <- rep(1, length(rainbow4.12c))
+pie(slices, col=rainbow4.12c)
+```
+
+```{r}
+indir <- "./processedData/5_Clustering_res_0.5"
+outdir <- "./processedData/6_Automated_annotations"
+dir.create(outdir, recursive = T)
+```
+
+```{r}
+library(Seurat)
+library(ggplot2)
+integrated <- readRDS(paste0(indir, "/31.integrated.rds"))
+integrated
+```
+
+```{r}
+conserved.markers <- openxlsx::read.xlsx(paste0(indir, "/23_conserved_markers_PC50_res0.5_23clusters.xlsx")
+                     , colNames = T)
+head(conserved.markers)
+```
+
+```{r}
+conserved.markers.pos <- conserved.markers[conserved.markers$marker.type == "POS", ]
+head(conserved.markers.pos)
+```
+
+```{r}
+table(integrated$sample.id)
+```
+
+```{r}
+library(dplyr)
+top1.pos <- conserved.markers.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -minimump_p_val)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = -max_pval)
+top1.pos <- top1.pos %>% group_by(cluster) %>% top_n(n = 1, wt = C0_avg_log2FC)
+head(top1.pos)
+```
+
+```{r}
+DefaultAssay(integrated) <- "RNA"
+f <- FeaturePlot(integrated, features = top1.pos$gene, min.cutoff = "q9", order = T, label = T
+                 , label.size = 8)
+f
+pdf(paste0(outdir, "/1_FeaturePlot_top_pos_markers.pdf")
+    , width = 28
+    , height = 42)
+f
+dev.off()
+```
+
+# DotPlot of top markers
+
+```{r}
+DefaultAssay(integrated) <- "RNA"
+d <- DotPlot(object = integrated
+        , features = top1.pos$gene
+        , cols = c("#03539C", "#E82564")
+        , dot.scale = 8) + RotatedAxis()
+d
+pdf(paste0(outdir, "/2_DotPlot_top_pos_markers.pdf")
+    , width = 12
+    , height = 8)
+d
+dev.off()
+```
+
+Stacked violin plot
+
+```{r}
+library(Seurat)
+library(patchwork)
+library(ggplot2)
+
+## remove the x-axis text and tick
+## plot.margin to adjust the white space between each plot.
+## ... pass any arguments to VlnPlot in Seurat
+modify_vlnplot<- function(obj, 
+                          feature, 
+                          pt.size = 0, 
+                          plot.margin = unit(c(-0.75, 0, -0.75, 0), "cm"),
+                          ...) {
+  p<- VlnPlot(obj, features = feature, pt.size = pt.size, ... )  + 
+    xlab("") + ylab(feature) + ggtitle("") + 
+    theme(legend.position = "none", 
+          axis.text.x = element_blank(), 
+          axis.ticks.x = element_blank(), 
+          axis.title.y = element_text(size = rel(1), angle = 0), 
+          axis.text.y = element_text(size = rel(1)), 
+          plot.margin = plot.margin ) 
+  return(p)
+}
+
+## extract the max value of the y axis
+extract_max<- function(p){
+  ymax<- max(ggplot_build(p)$layout$panel_scales_y[[1]]$range$range)
+  return(ceiling(ymax))
+}
+
+
+## main function
+StackedVlnPlot<- function(obj, features,
+                          pt.size = 0, 
+                          plot.margin = unit(c(-0.75, 0, -0.75, 0), "cm"),
+                          ...) {
+  
+  plot_list<- purrr::map(features, function(x) modify_vlnplot(obj = obj,feature = x, ...))
+  
+  # Add back x-axis title to bottom plot. patchwork is going to support this?
+  plot_list[[length(plot_list)]]<- plot_list[[length(plot_list)]] +
+    theme(axis.text.x=element_text(), axis.ticks.x = element_line())
+  
+  # change the y-axis tick to only max value 
+  ymaxs<- purrr::map_dbl(plot_list, extract_max)
+  plot_list<- purrr::map2(plot_list, ymaxs, function(x,y) x + 
+                            scale_y_continuous(breaks = c(y)) + 
+                            expand_limits(y = y))
+
+  p<- patchwork::wrap_plots(plotlist = plot_list, ncol = 1)
+  return(p)
+}
+```
+
+```{r}
+pal <- colorRampPalette(rainbow1.7c)
+levels <- levels(integrated$integrated_snn_res.0.5)
+colors.clusters <- pal(length(levels))
+colors.clusters <- colors.clusters[c(11:14, 1, 7, 2, 20, 3:4, 8, 5, 9, 15, 6, 10, 16, 21, 17:18, 22:23, 19)]
+names(colors.clusters) <- levels
+colors.clusters
+slices <- rep(1,length(levels))
+pie(slices, col=colors.clusters, labels = names(colors.clusters))
+```
+
+```{r}
+DefaultAssay(integrated) <- "RNA"
+Idents(integrated) <- "integrated_snn_res.0.5"
+features<- top1.pos$gene
+s <- StackedVlnPlot(obj = integrated, features = features,
+               cols = colors.clusters
+               , group.by = "integrated_snn_res.0.5")
+s
+pdf(
+  paste0(
+    outdir,
+    "/3_Stacked_violin_plots_Conserved_markers.pdf"
+  ),
+  width = 14,
+  height = 20
+)
+s
+dev.off()
+```
+
+# SingleR annotation
+
+```{r}
+library(celldex)
+ImmGen.se <- ImmGenData()
+ImmGen.se
+MouseRNAseq.se <- MouseRNAseqData()
+MouseRNAseq.se
+```
+
+```{r}
+library(SingleR)
+pred <- SingleR(test = integrated@assays$RNA@counts, ref = ImmGen.se
+                , assay.type.test=1
+                , labels = ImmGen.se$label.main)
+```
+
+```{r}
+head(pred)
+```
+
+```{r}
+# Summarizing the distribution:
+table(pred$labels)
+```
+
+```{r}
+plotScoreHeatmap(pred)
+```
+
+```{r}
+plotDeltaDistribution(pred, ncol = 3)
+```
+
+```{r}
+summary(is.na(pred$pruned.labels))
+```
+
+# Using multiple references
+```{r}
+pred.combined <- SingleR(test = integrated@assays$RNA@counts, 
+    ref = list(IG=ImmGen.se, MRD=MouseRNAseq.se), 
+    labels = list(ImmGen.se$label.main, MouseRNAseq.se$label.main))
+table(pred.combined$labels)
+```
+
+```{r}
+saveRDS(pred.combined, file = paste0(outdir, "/4.pred.combined.rds"))
+```
+
+```{r}
+integrated$singler.combined <- pred.combined$pruned.labels
+```
+
+```{r}
+p <- plotScoreHeatmap(pred.combined)
+p
+library(tidyverse)
+library(gridExtra)
+ggsave(paste0(outdir, "/5_SingleR_plotScoreHeatmap_pred.combined.pdf"), marrangeGrob(grobs = p[["grobs"]], nrow=1, ncol=3), width = 21, height = 7)
+```
+
+# All samples (6)
+
+```{r}
+sample.name <- c("C0","C24")
+sample.name
+```
+
+```{r}
+Idents(integrated) <- "sample.id"
+singler.annotation <- sapply(sample.name, function(sample) {
+  print(sample)
+  table(as.data.frame(
+    integrated$singler.combined[WhichCells(integrated, idents = sample)]
+  ))
+})
+```
+
+```{r}
+library(data.table)
+singler.annotation.dt <- rbindlist(lapply(singler.annotation, function(x) as.data.frame.list(x)), fill=TRUE)
+singler.annotation.dt$sample <- names(singler.annotation)
+singler.annotation.dt[is.na(singler.annotation.dt)] = 0
+singler.annotation.df <- as.data.frame(singler.annotation.dt)
+lc <- dim(singler.annotation.df)[2]
+new.order.columns <- c(lc, 1:(lc-1))
+singler.annotation.df <- singler.annotation.df[, new.order.columns]
+singler.annotation.df
+```
+
+```{r}
+openxlsx::write.xlsx(singler.annotation.df
+           , file = paste0(outdir, "/6_SingleR_annotation.xlsx"))
+```
+
+# stacked barplot
+
+```{r}
+mytable <- singler.annotation.df
+mytable
+```
+
+```{r}
+target <- sample.name
+```
+
+```{r}
+mytable <- mytable %>% arrange(factor(sample, levels = target))
+mytable
+```
+
+```{r}
+round_preserve_sum <- function(x, digits = 0) {
+  up <- 10 ^ digits
+  x <- x * up
+  y <- floor(x)
+  indices <- tail(order(x-y), round(sum(x)) - sum(y))
+  y[indices] <- y[indices] + 1
+  y / up
+}
+```
+
+```{r}
+rownames(mytable) <- mytable$sample
+mytable$sample <- NULL
+mytable
+```
+
+```{r}
+data <- apply(prop.table(data.matrix(mytable), 1)*100, 1, round_preserve_sum)
+data <- reshape2::melt(data)
+colnames(data) <- c("cell.type", "sample", "percentage")
+head(data)
+```
+
+```{r}
+target.cell.type <- colnames(mytable)
+library(dplyr)
+library(plyr)
+data <- ddply(data, .(sample),
+                     transform, pos = cumsum(percentage) - (0.5 * percentage))
+data$cell.type <- factor(data$cell.type, levels = rev(target.cell.type))
+head(data)
+```
+
+```{r}
+# library(Polychrome)
+# set.seed(9589496) # for reproducibility
+# levels <- colnames(mytable)
+# colors.cell.types <- createPalette(length(levels), rainbow1.7c, M=2000)
+# names(colors.cell.types) <- levels
+# colors.cell.types
+# slices <- rep(1, length(levels))
+# pie(slices, col=colors.cell.types, labels = names(colors.cell.types))
+```
+
+```{r}
+library(ggsci)
+p4 <- ggplot() + geom_bar(aes(y = percentage, x = sample, fill = cell.type), data = data,
+                           stat="identity")
+# p4 <- p4 + geom_text(data=data, aes(x = sample, y = pos,
+#                                              label = paste0(percentage,"%")), size=4)
+p4 <- p4 + theme(legend.position="bottom"
+                 , legend.direction="horizontal"
+                 , panel.grid.major = element_blank()
+                 , panel.grid.minor = element_blank()
+                 , panel.background = element_blank()
+                 , axis.line = element_line(colour = "black")
+                 )
+p4 <- p4 + labs(x="Sample", y="Percentage") +
+  scale_y_continuous(labels = scales::dollar_format(suffix = "%", prefix = "")) +
+  ggtitle("Cell type composition per sample (%)")
+p4 <- p4  + scale_fill_ucscgb()
+# + scale_fill_manual(values=colors.cell.types)
+p4
+pdf(paste0(outdir, "/7_Cell_type_composition_per_sample_wo_labels.pdf")
+    , width = 11
+    , height = 11)
+p4
+dev.off()
+```
+
+```{r}
+data$percentage.label <- sapply(data$percentage, function(x) {
+  if(x < 2) {
+    ""
+  } else {
+    paste0(x,"%")
+  }
+})
+data
+```
+
+```{r}
+p4 <- ggplot() + geom_bar(aes(y = percentage, x = sample, fill = cell.type), data = data,
+                           stat="identity")
+p4 <- p4 + geom_text(data=data, aes(x = sample, y = pos,
+                                             label = percentage.label), size=4)
+p4 <- p4 + theme(legend.position="bottom"
+                 , legend.direction="horizontal"
+                 , panel.grid.major = element_blank()
+                 , panel.grid.minor = element_blank()
+                 , panel.background = element_blank()
+                 , axis.line = element_line(colour = "black")
+                 )
+p4 <- p4 + labs(x="Sample", y="Percentage") +
+  scale_y_continuous(labels = scales::dollar_format(suffix = "%", prefix = "")) +
+  ggtitle("Cell type composition per sample (%)")
+p4 <- p4 + scale_fill_ucscgb()
+pdf(paste0(outdir, "/8_Cell_type_composition_per_sample_w_labels.pdf")
+    , width = 11
+    , height = 11)
+p4
+dev.off()
+```
+
+```{r}
+## View the annotations in a table compared to samples
+write.table(table(integrated$singler.combined, integrated$sample.id),
+            file = paste0(outdir, "/9_SingleR_ImmGen_MouseRNAseq_annotations_vs_sample.tsv"),
+            quote = T,
+            sep = "\t",
+            col.names = NA)
+```
+
+```{r}
+write.table(table(integrated$singler.combined, integrated$integrated_snn_res.0.5),
+            file = paste0(outdir, "/10_SingleR_ImmGen_MouseRNAseq_annotations_vs_Seurat_clusters_res_0.5.tsv"),
+            quote = T,
+            sep = "\t",
+            col.names = NA)
+```
+
+## databases are the murine ones: 1. Immgen 2. MouseRNAseq
+
+```{r}
+d <- DimPlot(integrated, reduction = "umap", pt.size = 0.2, label = T, label.size = 6,
+             group.by = "singler.combined"
+             , repel = T) + scale_fill_ucscgb()
+d
+pdf(paste0(outdir, "/11_DimPlot_umap_singler.combined.pdf")
+    , width = 10, height = 8)
+d
+dev.off()
+```
+
+# Using multiple references and fine labels
+```{r}
+pred.combined <- SingleR(test = integrated@assays$RNA@counts, 
+    ref = list(IG=ImmGen.se, MRD=MouseRNAseq.se), 
+    labels = list(ImmGen.se$label.fine, MouseRNAseq.se$label.fine))
+table(pred.combined$labels)
+```
+
+```{r}
+saveRDS(pred.combined, file = paste0(outdir, "/12.pred.combined.fine.rds"))
+```
+
+```{r}
+integrated$singler.combined.fine <- pred.combined$pruned.labels
+```
+
+```{r}
+p <- plotScoreHeatmap(pred.combined)
+p
+library(tidyverse)
+library(gridExtra)
+ggsave(paste0(outdir, "/13_SingleR_plotScoreHeatmap_pred.combined.fine.pdf"), marrangeGrob(grobs = p[["grobs"]], nrow=1, ncol=3), width = 21, height = 7)
+```
+
+# All samples (6)
+
+```{r}
+sample.name <- c("C0","C24")
+sample.name
+```
+
+```{r}
+Idents(integrated) <- "sample.id"
+singler.annotation <- sapply(sample.name, function(sample) {
+  print(sample)
+  table(as.data.frame(
+    integrated$singler.combined.fine[WhichCells(integrated, idents = sample)]
+  ))
+})
+```
+
+```{r}
+library(data.table)
+singler.annotation.dt <- rbindlist(lapply(singler.annotation, function(x) as.data.frame.list(x)), fill=TRUE)
+singler.annotation.dt$sample <- names(singler.annotation)
+singler.annotation.dt[is.na(singler.annotation.dt)] = 0
+singler.annotation.df <- as.data.frame(singler.annotation.dt)
+lc <- dim(singler.annotation.df)[2]
+new.order.columns <- c(lc, 1:(lc-1))
+singler.annotation.df <- singler.annotation.df[, new.order.columns]
+singler.annotation.df
+```
+
+```{r}
+openxlsx::write.xlsx(singler.annotation.df
+           , file = paste0(outdir, "/14_SingleR_annotation_fine.xlsx"))
+```
+
+# stacked barplot
+
+```{r}
+mytable <- singler.annotation.df
+mytable
+```
+
+```{r}
+target <- sample.name
+```
+
+```{r}
+mytable <- mytable %>% arrange(factor(sample, levels = target))
+mytable
+```
+
+```{r}
+round_preserve_sum <- function(x, digits = 0) {
+  up <- 10 ^ digits
+  x <- x * up
+  y <- floor(x)
+  indices <- tail(order(x-y), round(sum(x)) - sum(y))
+  y[indices] <- y[indices] + 1
+  y / up
+}
+```
+
+```{r}
+rownames(mytable) <- mytable$sample
+mytable$sample <- NULL
+mytable
+```
+
+```{r}
+data <- apply(prop.table(data.matrix(mytable), 1)*100, 1, round_preserve_sum)
+data <- reshape2::melt(data)
+colnames(data) <- c("cell.type", "sample", "percentage")
+head(data)
+```
+
+```{r}
+target.cell.type <- colnames(mytable)
+library(dplyr)
+library(plyr)
+data <- ddply(data, .(sample),
+                     transform, pos = cumsum(percentage) - (0.5 * percentage))
+data$cell.type <- factor(data$cell.type, levels = rev(target.cell.type))
+head(data)
+```
+
+```{r}
+# library(Polychrome)
+# set.seed(9589496) # for reproducibility
+# levels <- colnames(mytable)
+# colors.cell.types <- createPalette(length(levels), rainbow1.7c, M=2000)
+# names(colors.cell.types) <- levels
+# colors.cell.types
+# slices <- rep(1, length(levels))
+# pie(slices, col=colors.cell.types, labels = names(colors.cell.types))
+```
+
+```{r}
+library(ggsci)
+p4 <- ggplot() + geom_bar(aes(y = percentage, x = sample, fill = cell.type), data = data,
+                           stat="identity")
+# p4 <- p4 + geom_text(data=data, aes(x = sample, y = pos,
+#                                              label = paste0(percentage,"%")), size=4)
+p4 <- p4 + theme(legend.position="bottom"
+                 , legend.direction="horizontal"
+                 , panel.grid.major = element_blank()
+                 , panel.grid.minor = element_blank()
+                 , panel.background = element_blank()
+                 , axis.line = element_line(colour = "black")
+                 )
+p4 <- p4 + labs(x="Sample", y="Percentage") +
+  scale_y_continuous(labels = scales::dollar_format(suffix = "%", prefix = "")) +
+  ggtitle("Cell type composition per sample (%)")
+p4 <- p4  + scale_fill_ucscgb()
+# + scale_fill_manual(values=colors.cell.types)
+p4
+pdf(paste0(outdir, "/15_Cell_type_fine_composition_per_sample_wo_labels.pdf")
+    , width = 11
+    , height = 11)
+p4
+dev.off()
+```
+
+```{r}
+data$percentage.label <- sapply(data$percentage, function(x) {
+  if(x < 2) {
+    ""
+  } else {
+    paste0(x,"%")
+  }
+})
+data
+```
+
+```{r}
+p4 <- ggplot() + geom_bar(aes(y = percentage, x = sample, fill = cell.type), data = data,
+                           stat="identity")
+p4 <- p4 + geom_text(data=data, aes(x = sample, y = pos,
+                                             label = percentage.label), size=4)
+p4 <- p4 + theme(legend.position="bottom"
+                 , legend.direction="horizontal"
+                 , panel.grid.major = element_blank()
+                 , panel.grid.minor = element_blank()
+                 , panel.background = element_blank()
+                 , axis.line = element_line(colour = "black")
+                 )
+p4 <- p4 + labs(x="Sample", y="Percentage") +
+  scale_y_continuous(labels = scales::dollar_format(suffix = "%", prefix = "")) +
+  ggtitle("Cell type composition per sample (%)")
+p4 <- p4 + scale_fill_ucscgb()
+pdf(paste0(outdir, "/16_Cell_type_fine_composition_per_sample_w_labels.pdf")
+    , width = 11
+    , height = 11)
+p4
+dev.off()
+```
+
+```{r}
+## View the annotations in a table compared to samples
+write.table(table(integrated$singler.combined.fine, integrated$sample.id),
+            file = paste0(outdir, "/17_SingleR_ImmGen_MouseRNAseq_annotations_fine_vs_sample.tsv"),
+            quote = T,
+            sep = "\t",
+            col.names = NA)
+```
+
+```{r}
+write.table(table(integrated$singler.combined.fine, integrated$integrated_snn_res.0.5),
+            file = paste0(outdir, "/18_SingleR_ImmGen_MouseRNAseq_annotations_fine_vs_Seurat_clusters_res_0.5.tsv"),
+            quote = T,
+            sep = "\t",
+            col.names = NA)
+```
+
+## databases are the murine ones: 1. Immgen 2. MouseRNAseq
+
+```{r}
+d <- DimPlot(integrated, reduction = "umap", pt.size = 0.2, label = T, label.size = 6,
+             group.by = "singler.combined.fine") + scale_fill_ucscgb()
+d
+pdf(paste0(outdir, "/19_DimPlot_umap_singler.combined.fine.pdf")
+    , width = 10, height = 8)
+d
+dev.off()
+```
+
+```{r}
+saveRDS(integrated, paste0(outdir, "/integrated.rds"))
+```
+
+# Annotation with GSE107585
+
+```{r}
+outdir.2 <- paste0(outdir, "/20_SingleR_GSE107585")
+dir.create(outdir.2)
+```
+
+wget https://ftp.ncbi.nlm.nih.gov/geo/series/GSE107nnn/GSE107585/suppl/GSE107585_Mouse_kidney_single_cell_datamatrix.txt.gz
+gunzip GSE107585_Mouse_kidney_single_cell_datamatrix.txt.gz
+
+```{r, cache.lazy=FALSE}
+mat <- read.table(file = "./processedData/0_references/GSE107585/GSE107585_Mouse_kidney_single_cell_datamatrix.txt",
+                              header = T,
+                              row.names = 1,
+                              sep = "\t")
+head(mat)
+```
+
+```{r}
+dim(mat)
+```
+
+```{r}
+cluster.number <- mat[1, ]
+head(cluster.number)
+```
+
+```{r, cache.lazy=FALSE}
+mat <- mat[-1, ]
+dim(mat)
+mat <- mat[rowSums(mat) > 0, ] # Remove genes with no counts.
+dim(mat)
+```
+
+```{r}
+label <- cluster.number
+head(label)
+```
+
+```{r, cache.lazy=FALSE}
+library(SingleCellExperiment)
+kidney.sce <- SingleCellExperiment(assays = list(counts = mat))
+dim(kidney.sce)
+dim(colData(kidney.sce))
+```
+
+```{r}
+dim(t(label))
+```
+
+```{r, cache.lazy=FALSE}
+colData(kidney.sce) <- cbind(colData(kidney.sce), t(label))
+head(colData(kidney.sce))
+```
+
+```{r}
+head(kidney.sce$Cluster_Number)
+```
+
+```{r, cache.lazy=FALSE}
+kidney.sce <- kidney.sce[,!is.na(kidney.sce$Cluster_Number)]
+dim(kidney.sce)
+```
+
+```{r, cache.lazy=FALSE}
+library(scater)
+kidney.sce <- logNormCounts(kidney.sce)
+```
+
+```{r}
+pred.kidney <- SingleR(test=integrated@assays$RNA@data, ref=kidney.sce, labels=kidney.sce$Cluster_Number, de.method="wilcox")
+table(pred.kidney$labels)
+```
+
+```{r}
+table(pred.kidney$pruned.labels)
+```
+
+```{r}
+head(pred.kidney$scores)
+```
+
+```{r}
+integrated$singler.gse107585 <- pred.kidney$pruned.labels
+table(integrated$singler.gse107585)
+```
+
+Convert Cluster_number to cell types
+```{r}
+cell.types.short <- c("Endo"
+                , "Podo"
+                , "PT"
+                , "LOH"
+                , "DCT"
+                , "CD-PC"
+                , "CD-IC"
+                , "CD-Trans"
+                , "Novel1"
+                , "Fib"
+                , "Macro"
+                , "Neutro"
+                , "B lymph"
+                , "T lymph"
+                , "NK"
+                , "Novel2")
+```
+
+```{r}
+cell.types.long <- c("endothelial, vascular, and descending loop of Henle"
+                , "podocyte"
+                , "proximal tubule"
+                , "ascending loop of Henle"
+                , "distal convoluted tubule"
+                , "collecting duct principal cell"
+                , "collecting duct intercalated cell"
+                , "collecting duct transitional cell"
+                , "Novel1"
+                , "fibroblast"
+                , "macrophage"
+                , "neutrophil"
+                , "B lymphocyte"
+                , "T lymphocyte"
+                , "natural killer cell"
+                , "Novel2")
+```
+
+```{r}
+levels(as.factor(integrated$singler.gse107585))
+```
+
+```{r}
+library(plyr)
+integrated$singler.gse107585.short <- revalue(as.factor(integrated$singler.gse107585)
+                                              , c("1" = "Endo"
+                                                  , "2" = "Podo"
+                                                  , "3" = "PT"
+                                                  , "4" = "LOH"
+                                                  , "5" = "DCT"
+                                                  , "6" = "CD-PC"
+                                                  , "7" = "CD-IC"
+                                                  , "8" = "CD-Trans"
+                                                  , "9" = "Novel1"
+                                                  , "10" = "Fib"
+                                                  , "11" = "Macro"
+                                                  , "12" = "Neutro"
+                                                  , "13" = "B lymph"
+                                                  , "14" = "T lymph"
+                                                  , "15" = "NK"
+                                                  , "16" = "Novel2"))
+```
+
+```{r}
+library(plyr)
+integrated$singler.gse107585.long <- revalue(as.factor(integrated$singler.gse107585)
+                                              , c("1" = "endothelial, vascular, and descending loop of Henle"
+                                                  , "2" = "podocyte"
+                                                  , "3" = "proximal tubule"
+                                                  , "4" = "ascending loop of Henle"
+                                                  , "5" = "distal convoluted tubule"
+                                                  , "6" = "collecting duct principal cell"
+                                                  , "7" = "collecting duct intercalated cell"
+                                                  , "8" = "collecting duct transitional cell"
+                                                  , "9" = "Novel1"
+                                                  , "10" = "fibroblast"
+                                                  , "11" = "macrophage"
+                                                  , "12" = "neutrophil"
+                                                  , "13" = "B lymphocyte"
+                                                  , "14" = "T lymphocyte"
+                                                  , "15" = "natural killer cell"
+                                                  , "16" = "Novel2"))
+```
+
+```{r}
+saveRDS(integrated, file = paste0(outdir.2, '/1.annotated.gse107585.rds'))
+```
+
+```{r}
+table(integrated$singler.gse107585.long)
+```
+
+```{r}
+integrated.sce <- as.SingleCellExperiment(integrated)
+integrated.sce
+```
+
+```{r}
+p <- plotScoreHeatmap(pred.kidney, annotation_col=as.data.frame(colData(integrated.sce)[,"sample.id",drop=FALSE]))
+p
+pdf(paste0(outdir.2, "/2_SingleR_GSE107585_plotScoreHeatmap_Mouse_combined.pdf")
+    , width = 11, height = 8)
+p
+dev.off()
+```
+
+```{r}
+## UMAP plot colored by individual cell types
+length(levels(as.factor(integrated$singler.gse107585)))
+levels(as.factor(integrated$singler.gse107585))
+```
+
+```{r}
+# library(randomcoloR)
+# colors.cell.types <- randomColor(16)
+# colors.cell.types <- colors.cell.types[order(colors.cell.types)]
+# colors.cell.types
+colors.cell.types <- c("#166e72", "#21f27f", "#27c627", "#e008bc", "#6bef7f", "#74b7e0", "#8ecfed", "#9f24d8", "#adcc12", "#b51e50", "#b6dd4b", "#375199", "#e166f4", "#e206ba", "#ffb2e2", "#ffe821")
+names(colors.cell.types) <- levels(as.factor(integrated$singler.gse107585.long))
+slices <- rep(1,16)
+pie(slices, col=colors.cell.types, labels = names(colors.cell.types))
+```
+
+```{r}
+d <- DimPlot(integrated, reduction = "umap", pt.size = 0.2, label = F, label.size = 6, cols = colors.cell.types, group.by = "singler.gse107585.long")
+d
+pdf(paste0(outdir.2, "/3_DimPlot_umap_clusters_pc50_res0_5_group_by_SingleR_GSE107585_labels_combined.pdf")
+    , width = 14, height = 9)
+d
+dev.off()
+```
+
+```{r}
+colors.cell.types.short <- colors.cell.types
+names(colors.cell.types.short) <- levels(as.factor(integrated$singler.gse107585.short))
+d <- DimPlot(integrated, reduction = "umap", pt.size = 0.2, label = T, label.size = 6, cols = colors.cell.types.short, group.by = "singler.gse107585.short")
+d
+pdf(paste0(
+  outdir.2, "/4_DimPlot_umap_clusters_pc50_res0_5_group_by_SingleR_GSE107585_labels_short.pdf")
+    , width = 14, height = 9)
+d
+dev.off()
+```
+
+# View the annotations in a table vs the 2 samples
+```{r}
+t <- table(integrated$singler.gse107585.long, integrated$sample.id)
+t
+# library(xlsx)
+openxlsx::write.xlsx(as.data.frame.matrix(t) 
+           , file = paste0(
+             outdir.2, "/5_SingleR_GSE107585_annotations_vs_sample_id.xlsx")
+           , rowNames = T
+           , colNames = T)
+```
+
+# View the annotations in a table compared to the Seurat clusters
+```{r}
+t <- table(integrated$singler.gse107585.long, integrated$integrated_snn_res.0.5)
+t
+openxlsx::write.xlsx(as.data.frame.matrix(t) 
+           , file = paste0(outdir.2, "/6_SingleR_GSE107585_annotations_vs_Seurat_clusters_res_0_5.xlsx")
+           , rowNames = T
+           , colNames = T)
+```
+
+# Assigning cell type identity to clusters
+```{r, eval=FALSE}
+Idents(integrated) <- "integrated_snn_res.0.7"
+new.cluster.ids <- c("C0 = macrophage"
+                     , "C1 = endothelial, vascular and descending loop of Henle"
+                     , "C2 = macrophage"
+                     , "C3 = proximal tubule"
+                     , "C4 = ascending loop of Henle"
+                     , "C5 = proximal tubule"
+                     , "C6 = endothelial, vascular and descending loop of Henle"
+                     , "C7 = fibroblast"
+                     , "C8 = collecting duct principal cell"
+                     , "C9 = collecting duct principal cell"
+                     , "C10 = endothelial, vascular and descending loop of Henle"
+                     , "C11 = T lymphocyte"
+                     , "C12 = proximal tubule"
+                     , "C13 = fibroblast"
+                     , "C14 = distal convoluted tubule"
+                     , "C15 = endothelial, vascular and descending loop of Henle"
+                     , "C16 = collecting duct intercalated cell"
+                     , "C17 = distal convoluted tubule"
+                     , "C18 = endothelial, vascular and descending loop of Henle"
+                     , "C19 = fibroblast"
+                     , "C20 = endothelial, vascular and descending loop of Henle"
+                     , "C21 = macrophage")
+names(new.cluster.ids) <- levels(integrated)
+integrated <- RenameIdents(integrated, new.cluster.ids)
+integrated[["seurat.clusters.annotated.gse107585"]] <- integrated@active.ident
+```
+
+```{r, eval=FALSE}
+colors.clusters <- c("#96fc94", "#7efc84", "#e0b8f9", "#e68fea", "#dd43f2"
+                     , "#8bd64a", "#a90fd8", "#a8284a", "#af1d38", "#dba167"
+                     , "#0c7f0e", "#1305ad", "#ed5131", "#c47f09", "#ff9b21"
+                     , "#d6fca4", "#56ff3f", "#93ffbe", "#4f0b9e", "#ed55e3"
+                     , "#7bcc30", "#2905b7")
+names(colors.clusters) <- levels(as.factor(integrated$integrated_snn_res.0.7))
+colors.clusters
+slices <- rep(1,22)
+pie(slices, col=colors.clusters)
+```
+
+```{r, eval=FALSE}
+colors.annotated <- colors.clusters
+names(colors.annotated) <- levels(integrated$seurat.clusters.annotated.gse107585)
+d <- DimPlot(integrated, reduction = "umap", pt.size = 0.2, label = T, label.size = 3, cols = colors.annotated, group.by = "seurat.clusters.annotated.gse107585")
+d
+pdf("./processedData/3_SingleR_GSE107585/7_DimPlot_umap_clusters_pc30_res0_7_group_by_Seurat_clusters_annotated_GSE107585.pdf"
+    , width = 22, height = 9)
+d
+dev.off()
+```
+
+# Same without cluster number
+```{r, eval=FALSE}
+new.cluster.ids <- c("macrophage"
+                     , "endothelial, vascular and descending loop of Henle"
+                     , "macrophage"
+                     , "proximal tubule"
+                     , "ascending loop of Henle"
+                     , "proximal tubule"
+                     , "endothelial, vascular and descending loop of Henle"
+                     , "fibroblast"
+                     , "collecting duct principal cell"
+                     , "collecting duct principal cell"
+                     , "endothelial, vascular and descending loop of Henle"
+                     , "T lymphocyte"
+                     , "proximal tubule"
+                     , "fibroblast"
+                     , "distal convoluted tubule"
+                     , "endothelial, vascular and descending loop of Henle"
+                     , "collecting duct intercalated cell"
+                     , "distal convoluted tubule"
+                     , "endothelial, vascular and descending loop of Henle"
+                     , "fibroblast"
+                     , "endothelial, vascular and descending loop of Henle"
+                     , "macrophage")
+names(new.cluster.ids) <- levels(integrated)
+integrated <- RenameIdents(integrated, new.cluster.ids)
+integrated[["cell.types.clusters.gse107585"]] <- integrated@active.ident
+table(integrated[["cell.types.clusters.gse107585"]])
+```
+
+```{r, eval=FALSE}
+d <- DimPlot(integrated, reduction = "umap", pt.size = 0.2, label = T, label.size = 5, cols = colors.cell.types, group.by = "cell.types.clusters.gse107585")
+d
+pdf("./processedData/3_SingleR_GSE107585/8_DimPlot_umap_clusters_pc30_res0_7_group_by_cell_types_clusters_GSE107585.pdf"
+    , width = 14, height = 9)
+d
+dev.off()
+```
+
+
+## Session Information
+```{r}
+sessionInfo()
+```
+
+```{r}
+writeLines(capture.output(sessionInfo()), "./scripts/6_Automated_annotations/6_Automated_annotations.sessionInfo.txt")
+```
